@@ -1,0 +1,90 @@
+# Local ROM collections (including screenshots and related files)
+/.nes/
+/.gb/
+/.snes/
+/roms/
+*.[nN][eE][sS]
+*.[sS][mM][cC]
+*.[sS][fF][cC]
+*.[gG][bB]
+*.[gG][bB][cC]
+
+# Local generated output, packages and dependencies
+/output/
+/Wiiz_app/
+
+# Saves and emulator states
+saves/
+states/
+*.[sS][aA][vV]
+*.state
+*.state.*
+
+# Python / Node local dependencies and caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+node_modules/
+
+# CMake / Visual Studio / VS Code local build and user settings
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+.vs/
+.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.obj
+*.o
+*.pdb
+*.ilk
+*.tlog/
+
+# Local secrets and temporary files
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Android local build files
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/android/**/build/
+/android/**/.cxx/
+/android/signing/
+/android/signing.zip
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.key
+*.pem
+
+# Private analysis material and local project configuration
+/reference/
+/sample/
+.idea/
+/AGENTS.md
+/目的.md
+*.tbf
+*.ips
+*.bps
+*.zip
+*.apk
+*.exe
+*.dll

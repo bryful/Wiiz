@@ -1,0 +1,67 @@
+{
+  "format": "wiiz-program-identity",
+  "version": 1,
+  "window_offsets": [
+    0,
+    320,
+    1024,
+    4096,
+    8192,
+    12288
+  ],
+  "window_size": 128,
+  "minimum_matches": 3,
+  "profiles": [
+    {
+      "scenario": 1,
+      "mapper": 1,
+      "signatures": [
+        "6cefcf314f2826c60ec35fabaa3f9eea9569925863f9ea64d4cb48b129da35b3",
+        "79f336139d01ddc79597ed585f4917dd5443565c0541f9de741736038f2eb3f2",
+        "958a2c735730f9ba1a9c96b6529ae25dfda7e95e6b57cfc26559b16b19986ba7",
+        "0f7ca847fd4fd5204d4dd35c6ca0809c5713af0aa33147e5356a4b9354a7ff58",
+        "61ef0e1f1e11dde6af9680bc70dae6359fdebe4c59aa82b99957e97d302c21b0",
+        "8c2abf4e4897c8b8b08066ef52ee265968b3c1f884fb06afdcf50f831fd24220"
+      ],
+      "fixed_sha256": "728bae1cda03654cb12851822c3f43ca6886f108c1ee51556fe65fc4d6992c9e",
+      "camp_sha256": "37d66b18614f916e283b866838416f2c76fe6175bded0b1436abb358468d146f",
+      "sound_sha256": "03462b12e8e2163e4dd78a4e6e53be6552a514d893222ab9a288d3cf1b08a23a",
+      "spell_sha256": "8408373094b1e203d429afd445c1fbf941cbd124135e73146472858723921504",
+      "boot_sha256": "920492b911290222550604ae737e822a3f8223b4bcb9215b59f325b9b170e9b6"
+    },
+    {
+      "scenario": 2,
+      "mapper": 4,
+      "signatures": [
+        "714909ed304b2354536eb32ee035636d6e6343bf7574336f72f4c5b43f4420fb",
+        "f2899c0c69af6cbde0afd6cc3f43ea01d420edf0df3637c8a80067c4893ac125",
+        "4fa6e3414face9dcf1144384b4dd30e1f21cf62504fd71ce8b1b1767b5d019dc",
+        "9b3711c55822ad146cb3ab7641a43b243ad2432efd7da615c29c323206bd4265",
+        "d45cbfab218dc0856089a897c4e93c5aa590e12c3dbe9d4f18b7604182d62d3f",
+        "1f808625ee174fc39faefcab8cc8b6e1c533936be10c2b024772d7eb8da49bc3"
+      ],
+      "fixed_sha256": "076465be445bd94a429f03e9dd650bd768126978ad6bda680691f59917493043",
+      "camp_sha256": "3e8da8081475dd6da03f7e2c640f90eb8fa61b02c98846842bdef2308dfb85b7",
+      "sound_sha256": "120b6dc5ef1b0dc8eee541d6a7cb1f23f1d4fa9d602fc49e5869edd5e91acc10",
+      "spell_sha256": "b4323da55f866096b6abd32118de38fbf1a4b8878ca738a5004af7c65f73817e",
+      "boot_sha256": "824bd6d8bd32fe88b3ee99be124e5a63c7e0dcc1682ba0b3d9d75bd5a1290eb5"
+    },
+    {
+      "scenario": 3,
+      "mapper": 4,
+      "signatures": [
+        "888cc9f3ba2665cea8f47eaaeabab0badf10fab8f33baa8cfac33d583ea81899",
+        "0ca7fd1d6982b46e9f1005c92a5e13825441694745d12b6f20a09a12f9c6c99a",
+        "7dedda4f886220b2794896d250338d91b860db201e7036527816be4b819de09e",
+        "471a45ec3bd1093c17b2e0935eb89ff098734586683cdccee1b2af50b693bb04",
+        "e3d9c215356edf4497adb1a89e228a0d8da43270ae36d0cec3950473fc12628f",
+        "03705cef3951b580fc8b5bb1e3df2d2dbf967e2031a26af5097b316c6cd33bd8"
+      ],
+      "fixed_sha256": "c5155d76198c6405785f268e5e22006bdda00dba4845520d39c155f0bcf8f353",
+      "camp_sha256": "bf411976864ca16bade21e3942f2fa90b1fd94a31585065e2a46e2c6418127ad",
+      "sound_sha256": "44f3d69dbbc90b840b9e15c1e5f601e7f2878d54b63240369e6b0385d5e99e4c",
+      "spell_sha256": "207062e9b47ca345399a0d14b7a148ae4c4018ade1490af145c245e12ae69a52",
+      "boot_sha256": "e0121dbadd784c62e4348162b79f91526775daaada47bef82379c10e3f92b3a2"
+    }
+  ]
+}

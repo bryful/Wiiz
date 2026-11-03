@@ -1,0 +1,25 @@
+{
+  "name": "jsnes",
+  "version": "2.1.0",
+  "gitHead": "cbad9f1db57dfb275b90ffa26f9c479c355d8d5c",
+  "license": "Apache-2.0",
+  "dist": {
+    "shasum": "3abe3b1261accc7b3d9c4e4763cd58a8e4660e4f",
+    "tarball": "https://registry.npmjs.org/jsnes/-/jsnes-2.1.0.tgz",
+    "fileCount": 56,
+    "integrity": "sha512-LUa++E5Dfs1A6ZYB5HiSOR4JrUzrZEXGLZ5Imczhu9lkg7f+94SqnLZ/MXwGa7oc02+j/xYyHR0azGQ6LCU68g==",
+    "signatures": [
+      {
+        "sig": "MEQCIETOHZMwSvPovFVtiC5iKATqYK9oNkQVieA01CtfRIFzAiALIqD7PUd4JK7ZMDKiY6zBPH+WwSnlrwG3r0lF9ot+GA==",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      }
+    ],
+    "attestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/jsnes@2.1.0",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "unpackedSize": 2026719
+  }
+}

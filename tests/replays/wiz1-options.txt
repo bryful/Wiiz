@@ -1,0 +1,4 @@
+1200 A down
+1208 A up
+1240 X down
+1248 X up

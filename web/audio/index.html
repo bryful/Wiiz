@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Wiz1 BGMプレイヤー</title>
+<style>body{font:16px system-ui;background:#131927;color:#e8edf5;max-width:850px;margin:40px auto;padding:0 20px}h1{font-size:28px}button,select{font:inherit;padding:10px;margin:5px 8px 5px 0}button{cursor:pointer}audio{width:100%}a{color:#9ccaff}#status{min-height:28px;color:#a9d5bf}details{margin-top:30px}pre{white-space:pre-wrap;max-height:300px;overflow:auto;font-size:12px}label{display:block;margin:18px 0}small{color:#bbc6d8}</style>
+<h1>Wiz1 BGMプレイヤー</h1>
+<p>ROMから検出した13曲を、原作の音楽ドライバーとJSNESの音源で再生します。</p>
+<label>曲 <select id="track"></select></label>
+<button id="play">再生</button><button id="stop" disabled>停止</button>
+<label>音量 <input id="volume" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+<p id="status" role="status">曲を選んで再生してください。</p>
+<p><small>曲名・使用場面は未同定です。BGM 01は入力なしの起動時に使われます。繰り返し・終了は原作ドライバーに従います。タブが非表示になると停止します。</small></p>
+<h2>生成済みサンプル</h2>
+<p>BGM 01の約30秒。下の再生ボタンでも音を確認できます。</p>
+<audio controls preload="none" src="bgm-01.wav"></audio>
+<details><summary>検出したROMデータ</summary><pre id="data"></pre></details>
+<details><summary>JSNES 2.1.0 / Apache-2.0・著作者表示</summary><pre id="license">__LICENSE_TEXT__</pre></details>
+<script>__JSNES__</script>
+<script>__DRIVER__</script>
+<script>
+'use strict';
+const rom = Uint8Array.from(atob('__ROM_BASE64__'), c => c.charCodeAt(0));
+const tracks = WiizAudio.catalog(rom);
+const byId = id => document.getElementById(id);
+for (const t of tracks) byId('track').add(new Option(t.name, t.id));
+byId('data').textContent = tracks.map(t => `${t.name}: PRG $02 / ヘッダー $${t.header.toString(16).toUpperCase()} / ROM 0x${t.romOffset.toString(16)} / 演奏データ ${t.streams.map(p => '$'+p.toString(16).toUpperCase()).join(', ')}`).join('\n');
+let context, gain, timer, nes, queue = [], sources = new Set(), nextTime = 0, generation = 0;
+function stop() {
+  generation++;
+  clearInterval(timer); timer = null; nes = null;
+  for (const source of sources) { try { source.stop(); } catch (_) {} }
+  sources.clear(); queue = [];
+  byId('play').disabled = false; byId('stop').disabled = true;
+  byId('status').textContent = '停止しました。';
+  if (context) context.suspend().catch(() => {});
+}
+function pump() {
+  try {
+    while (nextTime < context.currentTime + 0.35) {
+      queue = [];
+      for (let i = 0; i < 12; i++) nes.frame();
+      if (!queue.length) throw Error('音声サンプルを取得できません');
+      const buffer = context.createBuffer(2, queue.length / 2, 48000);
+      const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
+      for (let i = 0; i < left.length; i++) { left[i] = queue[i*2]; right[i] = queue[i*2+1]; }
+      const source = context.createBufferSource(); source.buffer = buffer; source.connect(gain);
+      source.onended = () => sources.delete(source); sources.add(source);
+      nextTime = Math.max(nextTime, context.currentTime + 0.03);
+      source.start(nextTime); nextTime += buffer.duration;
+    }
+  } catch (error) { stop(); byId('status').textContent = '再生エラー: ' + error.message; }
+}
+byId('play').onclick = async () => {
+  stop(); const token = generation;
+  document.querySelector('audio').pause();
+  byId('play').disabled = true; byId('stop').disabled = false;
+  byId('status').textContent = 'ROMを確認して原作ドライバーを起動中…';
+  try {
+    context ||= new AudioContext({sampleRate:48000});
+    if (!gain) { gain = context.createGain(); gain.connect(context.destination); }
+    gain.gain.value = Number(byId('volume').value);
+    await context.resume();
+    const digest = await crypto.subtle.digest('SHA-256', rom);
+    if (Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2,'0')).join('') !== WiizAudio.ROM_SHA256) throw Error('ROMハッシュ不一致');
+    if (token !== generation) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    if (token !== generation) return;
+    nes = WiizAudio.create(jsnes.NES, rom, Number(byId('track').value), (l,r) => queue.push(l,r));
+    nextTime = context.currentTime + 0.1;
+    byId('status').textContent = byId('track').selectedOptions[0].text + ' を再生中';
+    pump(); if (nes) timer = setInterval(pump, 80);
+  } catch (error) { stop(); byId('status').textContent = '再生エラー: ' + error.message; }
+};
+byId('stop').onclick = stop;
+byId('volume').oninput = () => { if (gain) gain.gain.value = Number(byId('volume').value); };
+byId('track').onchange = stop;
+document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+window.addEventListener('pagehide', stop);
+</script></html>
