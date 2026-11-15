@@ -33,6 +33,7 @@ public:
     const float* audio(size_t* count);
     void releaseInput() { previousHeld_ = 0; input(0); }
     bool supportsTurbo() const { return enhanced_; }
+    void battleMultipliers(unsigned experience, unsigned gold);
     bool supportsBugFix() const { return bugFixSupported_; }
     bool bugFix() const { return bugFix_; }
     void bugFix(bool enabled);
@@ -79,6 +80,7 @@ private:
     int scenario_ = 0;
     size_t rosterFontOffset_ = 0;
     bool structuredSave_ = false, enhanced_ = false;
+    unsigned battleExpMultiplier_ = 1, battleGoldMultiplier_ = 1;
     bool bugFixSupported_ = false, bugFix_ = false;
     bool batterySaved_ = false, skipMaker_ = false, skipSupported_ = false;
     SaveFormat saveFormat_ = SaveFormat::Sav;

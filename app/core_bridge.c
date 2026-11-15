@@ -15,7 +15,62 @@ struct WiizCore {
     int sound_role;
     unsigned repeat_events[4], initial_events[4];
     unsigned map_profile, map_events, title_ready, assists, creation_events, roster_editable;
+    unsigned battle_exp_multiplier, battle_gold_multiplier;
 };
+void wiiz_core_battle_multipliers(WiizCore* core, unsigned experience, unsigned gold) {
+    core->battle_exp_multiplier = experience <= 256 ? experience : 1;
+    core->battle_gold_multiplier = gold <= 256 ? gold : 1;
+}
+
+static void multiply_battle_reward(WiizCore* core, unsigned pc, unsigned bank, unsigned addr) {
+    Emulator* e = core->e;
+    unsigned reward_addr, experience_call, experience_bank, gold_call, gold_bank;
+    switch (core->map_profile) {
+    case 1:
+        if (bank != 15 || pc != 0xf04d || addr != 0x00) return;
+        reward_addr = 0x0a;
+        experience_call = 0xe5b8; experience_bank = 15;
+        gold_call = 0xea94; gold_bank = 15;
+        break;
+    case 2:
+        if (bank != 15 || pc != 0xfb96 || addr != 0x0b) return;
+        reward_addr = 0x2a;
+        experience_call = 0x8418; experience_bank = 12;
+        gold_call = 0x8af2; gold_bank = 7;
+        break;
+    case 3:
+        if (bank != 15 || pc != 0xe0eb || addr != 0x0b) return;
+        reward_addr = 0x2a;
+        experience_call = 0x842b; experience_bank = 12;
+        gold_call = 0x8a24; gold_bank = 7;
+        break;
+    default:
+        return;
+    }
+    // The shared BCD divider is also used outside battle. Match its JSR caller.
+    uint8_t* ram = e->s.c.ram;
+    const unsigned sp = e->s.c.S;
+    const unsigned caller = ram[0x100 + ((sp + 1) & 255)] |
+                            (ram[0x100 + ((sp + 2) & 255)] << 8);
+    if (caller != experience_call && caller != gold_call) return;
+    const unsigned caller_bank = e->s.m.prg8k_bank[(caller - 0x8000) / 8192] & (e->ci.prg8k_banks - 1);
+    const bool experience = caller == experience_call;
+    if (caller_bank != (experience ? experience_bank : gold_bank)) return;
+    const unsigned multiplier = experience ? core->battle_exp_multiplier : core->battle_gold_multiplier;
+    if (multiplier <= 1) return;
+    uint64_t reward = 0;
+    for (unsigned i = 0; i < 6; ++i) {
+        const unsigned byte = ram[reward_addr + i];
+        if ((byte >> 4) > 9 || (byte & 15) > 9) return;
+        reward = reward * 100 + (byte >> 4) * 10 + (byte & 15);
+    }
+    reward *= multiplier;
+    if (reward > 999999999999ULL) reward = 999999999999ULL;
+    for (unsigned i = 6; i > 0; --i) {
+        ram[reward_addr + i - 1] = (uint8_t)(((reward / 10) % 10) * 16 + reward % 10);
+        reward /= 100;
+    }
+}
 int wiiz_core_prg_byte(WiizCore* core,size_t offset,unsigned value) {
     if(offset >= (size_t)core->e->ci.prg16k_banks*16384 || value>255)return 0;
     core->e->ci.prg_data[offset]=(uint8_t)value;return 1;
@@ -73,6 +128,8 @@ static bool sound_write(Emulator* e, uint16_t addr, uint8_t value, void* userdat
     if(forced>=0){put_assist(core,addr,(unsigned)forced);return false;}
     const unsigned pc=e->s.c.PC.val;
     const unsigned bank=pc>=0x8000 ? (e->s.m.prg8k_bank[(pc-0x8000)/8192] & (e->ci.prg8k_banks-1)) : 0;
+    if (core->sound_role != 2 && (core->battle_exp_multiplier > 1 || core->battle_gold_multiplier > 1))
+        multiply_battle_reward(core, pc, bank, addr);
     /* Wiz1's original creation stores both initial HP bytes here. Clamp only
        this event, after the original RNG/math; never clamp live combat HP. */
     if(core->map_profile==1 && core->sound_role!=2 && bank/2==6 && pc==0xa294 &&

@@ -360,6 +360,12 @@ void Session::reorderRoster(unsigned first,unsigned second,bool move) {
     try {save();}catch(...){wiiz_core_sram_write(core_,original.data(),original.size());throw;}
     reset();skipManufacturer();
 }
+void Session::battleMultipliers(unsigned experience, unsigned gold) {
+    if (!enhanced_) return;
+    battleExpMultiplier_ = experience;
+    battleGoldMultiplier_ = gold;
+    wiiz_core_battle_multipliers(core_, experience, gold);
+}
 void Session::rosterBonus(unsigned slot,unsigned kind,uint64_t amount) {
     if(!structuredSave_||!enhanced_)throw std::runtime_error("Unverified character layout");
     if(slot<1||slot>20||kind>3||(kind==3&&amount>2))throw std::runtime_error("Invalid roster bonus");
@@ -549,6 +555,7 @@ void Session::loadState(unsigned slot) {
     // Commit only after both snapshots have passed validation and restored successfully.
     wiiz_core_delete(core_);wiiz_core_delete(music_);core_=next.release();music_=music.release();
     wiiz_core_assists(core_,assistMask_,doc.value("assists_ready",false));
+    wiiz_core_battle_multipliers(core_, battleExpMultiplier_, battleGoldMultiplier_);
     previousHeld_=0;repeatAt_.fill(0);
     spellMap_=map;explored_=std::move(explored);mapResume_=resume;mapButton_=button;mapDirty_=true;
     wiiz_core_pixels(core_,pixels.data());

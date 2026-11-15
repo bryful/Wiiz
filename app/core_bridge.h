@@ -38,6 +38,7 @@ int wiiz_core_state_write(WiizCore*, uint8_t*, size_t);
 int wiiz_core_state_read(WiizCore*, const uint8_t*, size_t);
 void wiiz_core_map_profile(WiizCore*);
 void wiiz_core_assists(WiizCore*, unsigned mask, int ready);
+void wiiz_core_battle_multipliers(WiizCore*, unsigned experience, unsigned gold);
 unsigned wiiz_core_assist_mask(WiizCore*);
 unsigned wiiz_core_creation_events(WiizCore*);
 unsigned wiiz_core_peek(WiizCore*, unsigned addr);

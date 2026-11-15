@@ -66,7 +66,7 @@ int difficultyCheck(const char* romPath,const char* folderPath);
 int storageCheck(const char* romPath,const char* folderPath);
 int spellMapPrepare(const char* romPath,const char* folderPath);
 enum class MenuPage {Root,States,Display,Storage,Difficulty,Roster};
-enum class MenuAction {Back,Resume,States,Display,Storage,Games,Folder,Exit,Crt,Speed,Format,Maker,Slot,Difficulty,Character,Amount,Experience,Gold,Spells,Assist,Roster,RosterEntry,TurboFile,BugFix,Alignment};
+enum class MenuAction {Back,Resume,States,Display,Storage,Games,Folder,Exit,Crt,Speed,Format,Maker,Slot,Difficulty,Character,Amount,Experience,Gold,Spells,Assist,Roster,RosterEntry,TurboFile,BugFix,Alignment,BattleMultiplier};
 struct MenuItem {std::string label;MenuAction action;unsigned slot=0;};
 static const char* crtNames[]={"OFF","Mild","Standard"};
 static Uint32 folderEvent;
@@ -394,6 +394,15 @@ int main(int argc, char** argv) {
         if(!smoke){std::ifstream in(prefs/"wiz1-bug-fix.txt");int value;if(in>>value)wiz1BugFix=value==1;}
         unsigned assistMask=0;
         if(!smoke){std::ifstream in(prefs/"assists.txt");unsigned value;if(in>>value&&value<64)assistMask=value;}
+        unsigned battleMultiplierSteps[2]{};
+        if (!smoke) {
+            std::ifstream in(prefs/"battle-multipliers.txt");
+            unsigned experience, gold;
+            if (in >> experience >> gold && experience <= 8 && gold <= 8) {
+                battleMultiplierSteps[0] = experience;
+                battleMultiplierSteps[1] = gold;
+            }
+        }
 #ifdef SDL_PLATFORM_ANDROID
         unsigned crtMode=0; // CPU CRT reconstruction is opt-in on mobile.
 #else
@@ -488,6 +497,10 @@ int main(int argc, char** argv) {
                     if(game->supportsBugFix())items.push_back({std::string("Wiz1 bug Fix: ")+(game->bugFix()?"ON":"OFF"),MenuAction::BugFix});
                     items.push_back({std::string(names[5])+((assistMask&32)?": ON":": OFF"),MenuAction::Assist,32});
                     for(unsigned i=0;i<3;++i)items.push_back({std::string("Set alignment: ")+(i==0?"Good":i==1?"Neutral":"Evil"),MenuAction::Alignment,i});
+                    if (game->supportsTurbo()) {
+                        items.push_back({"Battle EXP: "+std::to_string(1u << battleMultiplierSteps[0])+"x",MenuAction::BattleMultiplier,0});
+                        items.push_back({"Battle Gold: "+std::to_string(1u << battleMultiplierSteps[1])+"x",MenuAction::BattleMultiplier,1});
+                    }
                 }
                 if(menuPage==MenuPage::Roster && game) {
                     for(unsigned i=0;i<20;++i)items.push_back({game->rosterLabel(rosterOrder[i]),MenuAction::RosterEntry,rosterOrder[i]});
@@ -525,6 +538,7 @@ int main(int argc, char** argv) {
 #endif
             if(next->supportsBugFix() && wiz1BugFix)next->bugFix(true);
             next->assists(next->supportsTurbo()?assistMask:0,false);
+            next->battleMultipliers(1u << battleMultiplierSteps[0], 1u << battleMultiplierSteps[1]);
             game = std::move(next); activeRom = entry.path; silence(); menu = false;
 #ifdef SDL_PLATFORM_ANDROID
             androidGameActive = true;
@@ -692,7 +706,7 @@ int main(int argc, char** argv) {
                     if(key==SDLK_DOWN)menuChoice=(menuChoice+1)%count;
                     const auto item=items.at(size_t(menuChoice));
                     if(item.action==MenuAction::Slot && (key==SDLK_LEFT||key==SDLK_RIGHT))stateLoadChoice=key==SDLK_RIGHT;
-                    const bool adjust=(key==SDLK_LEFT||key==SDLK_RIGHT) && (item.action==MenuAction::BugFix||item.action==MenuAction::Assist||item.action==MenuAction::Character||item.action==MenuAction::Amount||item.action==MenuAction::Crt||item.action==MenuAction::Speed||item.action==MenuAction::Format||item.action==MenuAction::Maker);
+                    const bool adjust=(key==SDLK_LEFT||key==SDLK_RIGHT) && (item.action==MenuAction::BugFix||item.action==MenuAction::Assist||item.action==MenuAction::Character||item.action==MenuAction::Amount||item.action==MenuAction::Crt||item.action==MenuAction::Speed||item.action==MenuAction::Format||item.action==MenuAction::Maker||item.action==MenuAction::BattleMultiplier);
                     if(key==SDLK_X||adjust)try {
                         switch(item.action) {
                         case MenuAction::BugFix:{
@@ -708,6 +722,15 @@ int main(int argc, char** argv) {
                         case MenuAction::Difficulty:menuPage=MenuPage::Difficulty;menuChoice=1;break;
                         case MenuAction::Character:bonusSlot=key==SDLK_LEFT?(bonusSlot==1?20:bonusSlot-1):(bonusSlot==20?1:bonusSlot+1);break;
                         case MenuAction::Amount:bonusAmount=(bonusAmount+(key==SDLK_LEFT?3:1))%4;break;
+                        case MenuAction::BattleMultiplier:{
+                            auto& step = battleMultiplierSteps[item.slot];
+                            step = (step + (key == SDLK_LEFT ? 8 : 1)) % 9;
+                            game->battleMultipliers(1u << battleMultiplierSteps[0], 1u << battleMultiplierSteps[1]);
+                            if (!smoke) {
+                                std::ofstream out(prefs/"battle-multipliers.txt");
+                                out << battleMultiplierSteps[0] << ' ' << battleMultiplierSteps[1] << '\n';
+                            }
+                            break;}
                         case MenuAction::Alignment:
                             game->rosterBonus(bonusSlot,3,item.slot);status="Character alignment changed.";break;
                         case MenuAction::Experience:case MenuAction::Gold:case MenuAction::Spells:
