@@ -33,9 +33,9 @@ with tempfile.TemporaryDirectory(dir=ROOT/'output', prefix='difficulty-check-') 
     result=subprocess.run([exe,'--smoke-turbo',str(rom),str(Path(folder)/'menu.bmp'),'118',str(replay),'4',str(saveFolder)],env=env,capture_output=True,text=True,timeout=60)
     assert result.returncode==0,result.stdout+result.stderr
     assert "bonus_actions=3" in result.stdout,result.stdout+result.stderr
-    states=next((Path(folder)/'wiz1'/'states').iterdir())
-    opened=json.loads((states/'slot2.json').read_text())['automap']
-    closed=json.loads((states/'slot3.json').read_text())['automap']
+    states=(Path(folder)/'wiz1'/'states')
+    opened=json.loads((states/'wiz1.stot2.state').read_text())['automap']
+    closed=json.loads((states/'wiz1.stot3.state').read_text())['automap']
     assert opened['dialog'][0]==3 and closed['dialog'][0]==0
     assert closed['resume']==0 and closed['button']==0
     (ROOT/'output/difficulty-ui.bmp').write_bytes((Path(folder)/'menu.bmp').read_bytes())

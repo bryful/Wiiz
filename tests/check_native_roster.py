@@ -48,6 +48,30 @@ with tempfile.TemporaryDirectory(dir=ROOT/'output',prefix='roster-check-') as fo
             source=0 if i==19 else i+1
             assert moved[part]==original[start+source*stride:start+source*stride+payload],(name,i)
             assert final[part]==original[part],(name,i)
-        return name+': SDL 20-row list, X/Return pick/confirm, insertion 1->20->1, bounds, Z/Q cancel: OK'
+        # From Character, wrap up to Change race, then confirm each choice.
+        record=slice(start,start+payload)
+        expected=bytearray(final[record])
+        race_shift=0 if first else 5
+        class_offset,class_shift=(11,0) if first else (10,2)
+        race=(expected[10]>>race_shift)&7
+        job=(expected[class_offset]>>class_shift)&7
+        race_step=-1 if race==4 else 1
+        class_step=-1 if job==7 else 1
+        keys=['Q']+['Down']*7+['X','Up','Up','Up','X','Up' if race_step<0 else 'Down',
+                            'X','Down','X','Up' if class_step<0 else 'Down','X']
+        # Title -> castle -> town edge -> training ground.
+        training=['X','Down','Down','Down','Down','X','X']
+        events=[(900+i*40,key) for i,key in enumerate(training)]
+        events.extend((1180+i*4,key) for i,key in enumerate(keys))
+        replay.write_text(''.join(f'{frame} {key} down\n{frame+1} {key} up\n' for frame,key in events))
+        p=subprocess.run([exe,'--smoke-turbo',str(ROOT/'.nes'/(name+'.nes')),str(temp/(name+'-identity.bmp')),'1290',str(replay),'4',str(saves)],env=env,capture_output=True,text=True,timeout=90)
+        assert p.returncode==0,p.stdout+p.stderr
+        edits=sorted((saves/'backups'/name).glob('*before-roster.sav'))
+        assert len(edits)==4,(name,len(edits),p.stdout)
+        expected[10]=(expected[10]&~(7<<race_shift))|((race+race_step)<<race_shift)
+        assert edits[-1].read_bytes()[record]==expected,(name,'race')
+        expected[class_offset]=(expected[class_offset]&~(7<<class_shift))|((job+class_step)<<class_shift)
+        assert (saves/(name+'.sav')).read_bytes()[record]==expected,(name,'class')
+        return name+': SDL roster order and training-ground race/class edits: OK'
     with ThreadPoolExecutor(max_workers=3) as pool:
         for line in pool.map(ui_check,sys.argv[2:] or ('wiz1','WIZ2','WIZ3','wiz1p','wiz2p','wiz3p')):print(line,flush=True)

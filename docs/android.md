@@ -57,11 +57,11 @@ Documents/Wiiz/
   Save/                 ROM名.sav（または選択したJSON形式）
     backups/            通常保存処理に伴うバックアップ
   state/
-    ROMのSHA256/
-      slot1.json        Save 1 / Load 1
-      slot2.json … slot5.json
+    ROM名.stot1.state   Save 1 / Load 1
+    ROM名.stot2.state … ROM名.stot5.state
 ```
 
+新しい名前のステートがない場合は、共有フォルダー内の従来の `state/<ROMのSHA256>/slot1.json` などを読み込みます。
 SAV・ステート・バックアップ・書込用一時ファイルは、指定したフォルダーへ直接読み書きします。
 内部領域へSAVやステートを複製・同期する方式や、エクスポート／インポート機能はありません。
 フォルダー未選択・アクセス権喪失・書込失敗時にはエラーにし、内部保存へフォールバックしません。

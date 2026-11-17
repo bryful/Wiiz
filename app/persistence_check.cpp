@@ -16,7 +16,7 @@ static void require(bool ok,const char* message){if(!ok)throw std::runtime_error
 int laterSpellMapPrepare(const char* romPath,const char* folderPath);
 int spellMapPrepare(const char* romPath,const char* folderPath) {
     if(identifyRom(pathFromUtf8(romPath)).identity.scenario>1)return laterSpellMapPrepare(romPath,folderPath);
-    const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);Session session(entry,folder/"saves",SaveFormat::Json);session.stateFolder(folder/"states"/entry.sha);
+    const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);Session session(entry,folder/"saves",SaveFormat::Json);session.stateFolder(folder/"states");
     std::ifstream replay("tests/replays/wiz1-dungeon.txt");require(bool(replay),"Missing map replay");
     struct Event{int frame;unsigned key;bool down;};std::vector<Event> events;std::string line;
     while(std::getline(replay,line)){int frame;std::string key,action;std::istringstream row(line);if(!(row>>frame>>key>>action))continue;unsigned b=key=="X"?PAD_A:key=="Z"?PAD_B:key=="Down"?PAD_DOWN:0;events.push_back({frame,b,action=="down"});}
@@ -100,7 +100,7 @@ int persistenceCheck(const char* romPath,const char* folderPath) {
     }
     session->saveState(3);
     const auto captured=session->pixels;
-    const auto stateFile=folder/"states"/entry.sha/"slot3.json";
+    const auto stateFile=folder/"states"/(entry.path.stem().native()+fs::path(".stot3.state").native());
     std::vector<std::array<uint32_t,256*240>> expectedPixels;
     std::vector<std::vector<float>> expectedAudio;
     for(int t=0;t<180;++t) {
@@ -125,7 +125,7 @@ int persistenceCheck(const char* romPath,const char* folderPath) {
     // Damage rejection must leave the live game untouched.
     session->saveState(5);
     const auto intact=session->pixels;
-    const auto bad=folder/"states"/entry.sha/"slot5.json";
+    const auto bad=folder/"states"/(entry.path.stem().native()+fs::path(".stot5.state").native());
     {std::ifstream in(bad);in>>document;}document["game"]["bytes"].get_ref<std::string&>()[100]='x';
     {std::ofstream out(bad,std::ios::binary|std::ios::trunc);out<<document.dump();}
     bool rejected=false;try{session->loadState(5);}catch(const std::exception&){rejected=true;}
@@ -141,7 +141,7 @@ int persistenceCheck(const char* romPath,const char* folderPath) {
 
 int laterSpellMapPrepare(const char* romPath,const char* folderPath) {
     const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);const int scenario=entry.identity.scenario;
-    Session session(entry,folder/"saves",SaveFormat::Json);session.stateFolder(folder/"states"/entry.sha);
+    Session session(entry,folder/"saves",SaveFormat::Json);session.stateFolder(folder/"states");
     auto shot=[&](const char* name){SDL_Surface* im=SDL_CreateSurfaceFrom(256,240,SDL_PIXELFORMAT_RGBA32,session.pixels.data(),1024);SDL_SaveBMP(im,utf8(folder/(std::string(name)+".bmp")).c_str());SDL_DestroySurface(im);};
     std::ifstream replay("tests/replays/wiz1-dungeon.txt");
     struct Event{int frame;unsigned key;bool down;};std::vector<Event> events;std::string line;
@@ -238,7 +238,7 @@ int difficultyCheck(const char* romPath,const char* folderPath) {
     }
     spellMapPrepare(romPath,folderPath);
     const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);
-    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states"/entry.sha);session.loadState(1);
+    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states");session.loadState(1);
     const int game=entry.identity.scenario;
     std::vector<uint8_t> before(8192),after(8192);wiiz_core_sram_read(session.core(),before.data(),before.size());
     const auto position=session.positionText();require(!position.empty(),"Missing position");
@@ -307,7 +307,7 @@ int assistsCheck(const char* romPath,const char* folderPath) {
     spellMapPrepare(romPath,folderPath);
     const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);
     auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;
-    session.stateFolder(folder/"states"/entry.sha);session.loadState(3);
+    session.stateFolder(folder/"states");session.loadState(3);
     const unsigned game=entry.identity.scenario,base=game==1?0:0x400,mp=game==1?0x29:0x27;
     session.assists(15);session.saveState(2);
     require(wiiz_core_assist_probe(session.core()),"CPU RAM/SRAM freeze failed");session.loadState(2);
@@ -332,7 +332,7 @@ int assistsCheck(const char* romPath,const char* folderPath) {
 static int creationCheckImpl(const char* romPath,const char* folderPath,bool hpTest) {
     const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);fs::create_directories(folder);
     auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;
-    session.assists(16,false);session.stateFolder(folder/"states"/entry.sha);
+    session.assists(16,false);session.stateFolder(folder/"states");
     if(hpTest && entry.identity.scenario==1)session.bugFix(true);
     auto shot=[&](const char* name){auto* raw=SDL_CreateSurfaceFrom(256,240,SDL_PIXELFORMAT_RGBA32,session.pixels.data(),1024);auto* scaled=SDL_CreateSurface(768,720,SDL_PIXELFORMAT_RGBA32);SDL_BlitSurfaceScaled(raw,nullptr,scaled,nullptr,SDL_SCALEMODE_NEAREST);SDL_SaveBMP(scaled,utf8(folder/(std::string(name)+".bmp")).c_str());SDL_DestroySurface(scaled);SDL_DestroySurface(raw);};
     auto press=[&](unsigned b){session.input(b);for(unsigned f=0;f<3;++f)session.frame();session.input(0);for(unsigned f=0;f<100;++f)session.frame();};
@@ -392,7 +392,7 @@ int creationHpMenuCheck(const char* romPath,const char* folderPath) {return crea
 
 int rosterCheck(const char* romPath,const char* folderPath) {
     spellMapPrepare(romPath,folderPath);const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);
-    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states"/entry.sha);session.loadState(1);
+    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states");session.loadState(1);
     const unsigned game=entry.identity.scenario,start=game==1?0:0x400,stride=game==1?256:96,payload=game==1?112:94,mp=game==1?0x29:0x27;
     auto ram=[&]{std::vector<uint8_t> data(8192);require(wiiz_core_sram_read(session.core(),data.data(),data.size()),"Cannot inspect roster");return data;};
     auto before=ram();bool blocked=false;try{session.swapRoster(1,2);}catch(...){blocked=true;}require(blocked&&ram()==before,"Live swap changed gameplay state");
@@ -431,12 +431,58 @@ int rosterCheck(const char* romPath,const char* folderPath) {
     }
     session.moveRoster(20,1);after=ram();
     for(unsigned i=0;i<20;++i)require(std::equal(before.begin()+start+i*stride,before.begin()+start+i*stride+payload,after.begin()+start+i*stride),"Reverse insertion lost records");
-    std::printf("ROSTER_OK scenario=%u complete_records=1 resumed_original_mage=1 empty_slot=1 reverse=1 restart=1 backup=1 live_rejected=1 insertion_20=1 reverse_insertion=1 party_remap=1\n",game);return 0;
+    using Field=Session::RosterField;
+    auto rejectIdentity=[&](unsigned slot,Field field,unsigned value,const char* reason) {
+        const auto original=ram();
+        bool rejected=false;
+        try{session.setRosterIdentity(slot,field,value);}catch(const std::runtime_error&){rejected=true;}
+        require(rejected&&ram()==original,reason);
+    };
+    {
+        rejectIdentity(20,Field::Race,4,"Empty slot accepted an identity edit");
+        rejectIdentity(1,Field::Race,5,"Out-of-range race accepted");
+        rejectIdentity(1,Field::Class,8,"Out-of-range class accepted");
+        press(PAD_A);
+        for(unsigned i=0;i<4;++i)press(PAD_DOWN);
+        press(PAD_A);press(PAD_A);shot("training-identity");
+        require(!session.canSwapRoster(),"Training route did not leave title");
+        session.rosterBonus(1,3,2);
+        after=ram();
+        auto expected=after;
+        const unsigned race=game==1?((after[start+10]&7)+1)%5:((after[start+10]>>5)+1)%5;
+        const unsigned job=game==1?((after[start+11]&7)+1)%8:(((after[start+10]>>2)&7)+1)%8;
+        if(game==1) {
+            expected[start+10]=uint8_t((after[start+10]&0xf8)|race);
+            expected[start+11]=uint8_t((after[start+11]&0xf8)|job);
+        } else {
+            expected[start+10]=uint8_t((race<<5)|(job<<2)|2);
+        }
+        auto facilityScreen=std::make_unique<decltype(session.pixels)>(session.pixels);
+        session.setRosterIdentity(1,Field::Race,race);
+        require(session.pixels==*facilityScreen&&!session.canSwapRoster(),"Identity edit interrupted training");
+        press(PAD_B);
+        require(session.rosterIdentity(1,Field::Race)==int(race),"Leaving training lost edited race");
+
+        title();press(PAD_A);press(PAD_A);shot("tavern-identity");
+        require(!session.canSwapRoster(),"Tavern route did not leave title");
+        *facilityScreen=session.pixels;
+        session.setRosterIdentity(1,Field::Class,job);
+        require(session.pixels==*facilityScreen&&!session.canSwapRoster(),"Identity edit interrupted tavern");
+        press(PAD_B);
+        after=ram();
+        for(unsigned i=0;i<20;++i)
+            require(std::equal(expected.begin()+start+i*stride,expected.begin()+start+i*stride+payload,after.begin()+start+i*stride),"Identity edit changed unrelated character data");
+        require(session.rosterIdentity(1,Field::Race)==int(race)&&session.rosterIdentity(1,Field::Class)==int(job),"Leaving tavern lost edited identity");
+        auto edited=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);
+        edited->skipManufacturer();
+        require(edited->rosterIdentity(1,Field::Race)==int(race)&&edited->rosterIdentity(1,Field::Class)==int(job),"ROM restart lost edited identity");
+    }
+    std::printf("ROSTER_OK scenario=%u complete_records=1 resumed_original_mage=1 empty_slot=1 reverse=1 restart=1 backup=1 live_reorder_rejected=1 insertion_20=1 reverse_insertion=1 party_remap=1 facility_identity_edit=1\n",game);return 0;
 }
 
 int turboFileCheck(const char* romPath,const char* folderPath) {
     const auto entry=identifyRom(pathFromUtf8(romPath));const auto folder=pathFromUtf8(folderPath);fs::create_directories(folder);
-    Session session(entry,folder/"saves",SaveFormat::Sav);session.stateFolder(folder/"states"/entry.sha);
+    Session session(entry,folder/"saves",SaveFormat::Sav);session.stateFolder(folder/"states");
     auto shot=[&](unsigned n){auto* raw=SDL_CreateSurfaceFrom(256,240,SDL_PIXELFORMAT_RGBA32,session.pixels.data(),1024);auto* scaled=SDL_CreateSurface(768,720,SDL_PIXELFORMAT_RGBA32);SDL_BlitSurfaceScaled(raw,nullptr,scaled,nullptr,SDL_SCALEMODE_NEAREST);SDL_SaveBMP(scaled,utf8(folder/("step-"+std::to_string(n)+".bmp")).c_str());SDL_DestroySurface(scaled);SDL_DestroySurface(raw);};
     for(unsigned f=0;f<900;++f){session.input(f==400||f==401?PAD_A:0);session.frame();}
     shot(0);std::ifstream in(folder/"keys.txt");std::string keys;in>>keys;if(keys.empty())keys="DDDDADDDA";

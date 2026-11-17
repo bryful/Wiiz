@@ -65,8 +65,10 @@ int assistsCheck(const char* romPath,const char* folderPath);
 int difficultyCheck(const char* romPath,const char* folderPath);
 int storageCheck(const char* romPath,const char* folderPath);
 int spellMapPrepare(const char* romPath,const char* folderPath);
-enum class MenuPage {Root,States,Display,Storage,Difficulty,Roster};
-enum class MenuAction {Back,Resume,States,Display,Storage,Games,Folder,Exit,Crt,Speed,Format,Maker,Slot,Difficulty,Character,Amount,Experience,Gold,Spells,Assist,Roster,RosterEntry,TurboFile,BugFix,Alignment,BattleMultiplier};
+enum class MenuPage {Root,States,Display,Storage,Difficulty,Roster,Identity};
+enum class MenuAction {Back,Resume,States,Display,Storage,Games,Folder,Exit,Crt,Speed,Format,Maker,Slot,Difficulty,Character,Amount,Experience,Gold,Spells,Assist,Roster,RosterEntry,TurboFile,BugFix,Alignment,BattleMultiplier,Race,Class,SetIdentity};
+constexpr const char* raceNames[]={"Human","Elf","Dwarf","Gnome","Hobbit"};
+constexpr const char* classNames[]={"Fighter","Mage","Priest","Thief","Bishop","Samurai","Lord","Ninja"};
 struct MenuItem {std::string label;MenuAction action;unsigned slot=0;};
 static const char* crtNames[]={"OFF","Mild","Standard"};
 static Uint32 folderEvent;
@@ -452,6 +454,8 @@ int main(int argc, char** argv) {
         int stateSaves = 0, stateLoads = 0, stateErrors = 0, bonusActions = 0, rosterSwaps = 0;
         bool running = true, menu = false, pending = false, focused = true;
         bool stateLoadChoice = false;MenuPage menuPage=MenuPage::Root;
+        auto identityField=Session::RosterField::Race;
+        int identityMenuReturn=0;
         unsigned bonusSlot=1,bonusAmount=1,rosterPicked=0;
         std::array<unsigned,20> rosterOrder{};
         auto resetRosterOrder=[&]{for(unsigned i=0;i<20;++i)rosterOrder[i]=i+1;rosterPicked=0;};
@@ -501,6 +505,18 @@ int main(int argc, char** argv) {
                         items.push_back({"Battle EXP: "+std::to_string(1u << battleMultiplierSteps[0])+"x",MenuAction::BattleMultiplier,0});
                         items.push_back({"Battle Gold: "+std::to_string(1u << battleMultiplierSteps[1])+"x",MenuAction::BattleMultiplier,1});
                     }
+                    if(game->supportsRosterIdentity()) {
+                        items.push_back({"Change race >",MenuAction::Race});
+                        items.push_back({"Change class >",MenuAction::Class});
+                    }
+                }
+                if(menuPage==MenuPage::Identity && game) {
+                    const bool race=identityField==Session::RosterField::Race;
+                    const auto* names=race?raceNames:classNames;
+                    const unsigned count=race?std::size(raceNames):std::size(classNames);
+                    const int current=game->rosterIdentity(bonusSlot,identityField);
+                    for(unsigned i=0;i<count;++i)
+                        items.push_back({std::string(names[i])+(int(i)==current?" (current)":""),MenuAction::SetIdentity,i});
                 }
                 if(menuPage==MenuPage::Roster && game) {
                     for(unsigned i=0;i<20;++i)items.push_back({game->rosterLabel(rosterOrder[i]),MenuAction::RosterEntry,rosterOrder[i]});
@@ -515,6 +531,7 @@ int main(int argc, char** argv) {
         };
         auto backMenu=[&]{
             if(menuPage==MenuPage::Root){menu=false;silence();return;}
+            if(menuPage==MenuPage::Identity){menuPage=MenuPage::Difficulty;menuChoice=identityMenuReturn;return;}
             menuChoice=game?(menuPage==MenuPage::Roster?8:menuPage==MenuPage::Difficulty?7:menuPage==MenuPage::States?1:menuPage==MenuPage::Display?2:3):(menuPage==MenuPage::Display?0:1);
             menuPage=MenuPage::Root;
         };
@@ -532,9 +549,9 @@ int main(int argc, char** argv) {
 #endif
             auto next = std::make_unique<Session>(entry, saveFolder, saveFormat, skipMaker);
 #ifdef SDL_PLATFORM_ANDROID
-            next->stateFolder(fs::path("/wiiz-shared/state") / entry.sha);
+            next->stateFolder(fs::path("/wiiz-shared/state"));
 #else
-            next->stateFolder((smoke && argc>7 ? pathFromUtf8(argv[7]).parent_path() : prefs) / "states" / entry.sha);
+            next->stateFolder((smoke && argc>7 ? pathFromUtf8(argv[7]).parent_path() : prefs) / "states");
 #endif
             if(next->supportsBugFix() && wiz1BugFix)next->bugFix(true);
             next->assists(next->supportsTurbo()?assistMask:0,false);
@@ -733,6 +750,19 @@ int main(int argc, char** argv) {
                             break;}
                         case MenuAction::Alignment:
                             game->rosterBonus(bonusSlot,3,item.slot);status="Character alignment changed.";break;
+                        case MenuAction::Race:case MenuAction::Class:{
+                            identityField=item.action==MenuAction::Race?Session::RosterField::Race:Session::RosterField::Class;
+                            const int current=game->rosterIdentity(bonusSlot,identityField);
+                            if(current<0)throw std::runtime_error("This roster slot is empty.");
+                            identityMenuReturn=menuChoice;
+                            menuPage=MenuPage::Identity;
+                            menuChoice=1+(item.action==MenuAction::Race&&current>=int(std::size(raceNames))?0:current);
+                            status="Roster slot "+std::to_string(bonusSlot)+": choose a new "+(item.action==MenuAction::Race?"race.":"class.");
+                            break;}
+                        case MenuAction::SetIdentity:
+                            game->setRosterIdentity(bonusSlot,identityField,item.slot);
+                            status="Roster slot "+std::to_string(bonusSlot)+": "+item.label+".";
+                            backMenu();break;
                         case MenuAction::Experience:case MenuAction::Gold:case MenuAction::Spells:
                             game->rosterBonus(bonusSlot,item.action==MenuAction::Experience?0:item.action==MenuAction::Gold?1:2,bonusAmounts[bonusAmount]);
                             ++bonusActions;status="Roster slot "+std::to_string(bonusSlot)+": "+(item.action==MenuAction::Spells?"all spells learned; MP unchanged.":item.action==MenuAction::Experience?"experience prepared; rest at the inn to level up.":"Gold added.");break;
@@ -852,7 +882,7 @@ int main(int argc, char** argv) {
                 constexpr int visible=6;constexpr float rowHeight=88, rowTop=166;
                 const int first=std::clamp(menuChoice-2,0,std::max(0,int(items.size())-visible));
                 wizFrame(renderer,{28,54,968,744});
-                const char* heading=menuPage==MenuPage::Root?"OPTIONS":menuPage==MenuPage::States?"STATE SAVE / LOAD":menuPage==MenuPage::Display?"DISPLAY / SPEED":menuPage==MenuPage::Roster?"ROSTER":menuPage==MenuPage::Difficulty?"DIFFICULTY":"SAVE / STARTUP";
+                const char* heading=menuPage==MenuPage::Root?"OPTIONS":menuPage==MenuPage::States?"STATE SAVE / LOAD":menuPage==MenuPage::Display?"DISPLAY / SPEED":menuPage==MenuPage::Roster?"ROSTER":menuPage==MenuPage::Difficulty?"DIFFICULTY":menuPage==MenuPage::Identity?(identityField==Session::RosterField::Race?"CHANGE RACE":"CHANGE CLASS"):"SAVE / STARTUP";
                 wizText(renderer,game.get(),68,82,heading,4);
                 wizText(renderer,game.get(),770,90,std::to_string(menuChoice+1)+"/"+std::to_string(items.size()),3);
                 auto shortLabel=[](std::string s){

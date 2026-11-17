@@ -56,13 +56,20 @@ def main():
                                 capture_output=True, text=True, check=True, env=env)
         assert 'state_saves=6 state_loads=6 state_errors=1' in result.stdout, result.stdout
         assert 'menu=1' in result.stdout
-        slots = list((temp/'ui/states').glob('*/slot*.json'))
-        assert len(slots) == 5 and all(json.loads(p.read_text())['format'] == 'wiiz-state' for p in slots)
-        keys.write_text('5 Shift+F1 down\n6 Shift+F1 up\n')
+        states = temp/'ui/states'
+        slots = [states/f'wiz1.stot{slot}.state' for slot in range(1, 6)]
+        documents = [json.loads(p.read_text()) for p in slots]
+        assert all(document['format'] == 'wiiz-state' for document in documents)
+        legacy = states/documents[1]['rom_sha256']/'slot2.json'
+        legacy.parent.mkdir()
+        slots[1].rename(legacy)
+        old_state = legacy.read_bytes()
+        keys.write_text('5 Shift+F1 down\n6 Shift+F1 up\n9 Shift+F2 down\n10 Shift+F2 up\n13 F2 down\n14 F2 up\n')
         result = subprocess.run([exe, '--smoke-turbo', str(ROOT/'.nes/wiz1.nes'), str(temp/'restarted.bmp'),
                                  '90', str(keys), '1', str(temp/'ui/saves')],
                                 capture_output=True, text=True, check=True, env=env)
-        assert 'state_saves=0 state_loads=1 state_errors=0' in result.stdout, result.stdout
+        assert 'state_saves=1 state_loads=2 state_errors=0' in result.stdout, result.stdout
+        assert slots[1].is_file() and legacy.read_bytes() == old_state
         print('SDL shortcuts F1-F5 / Shift+F1-F5, Q slot 5 Save/Load and empty-slot recovery: OK')
         print('Restarted-process state load and invalid battery JSON preservation: OK')
 

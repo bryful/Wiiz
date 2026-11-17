@@ -43,6 +43,16 @@ unsigned experienceLevel(unsigned scenario,unsigned cls,uint64_t value) {
     }
     return low;
 }
+struct RosterIdentityBits {unsigned offset, shift;};
+RosterIdentityBits rosterIdentityBits(unsigned scenario,Session::RosterField field) {
+    const bool race=field==Session::RosterField::Race;
+    // FC1–3 field layouts from bryful/Wiz (MIT), also used by save_json.cpp.
+    if(scenario==1)return {race?0x0au:0x0bu,0};
+    return {0x0a,race?5u:2u};
+}
+size_t rosterRecordOffset(unsigned scenario,unsigned slot) {
+    return scenario==1?(slot-1)*256:0x400+(slot-1)*96;
+}
 }
 
 namespace fs = std::filesystem;
@@ -75,7 +85,7 @@ std::vector<RomEntry> scanRoms(const fs::path& folder, int& rejected) {
     std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.title == b.title ? a.path < b.path : a.title < b.title; });
     return entries;
 }
-Session::Session(const RomEntry& entry, const fs::path& saveFolder, SaveFormat format, bool skipMaker) : rom_(readBytes(entry.path)), title(entry.title), sha_(entry.sha) {
+Session::Session(const RomEntry& entry, const fs::path& saveFolder, SaveFormat format, bool skipMaker) : title(entry.title), rom_(readBytes(entry.path)), romStem_(entry.path.stem()), sha_(entry.sha) {
     saveFormat_=format;skipMaker_=skipMaker;
     const auto identity=inspectWizardry(rom_.data(),rom_.size());
     rosterFontOffset_=identity.prgOffset+identity.prgBytes+(identity.scenario==1?4:1)*4096;
@@ -90,9 +100,10 @@ Session::Session(const RomEntry& entry, const fs::path& saveFolder, SaveFormat f
     try {
         if (!saveFolder.empty()) {
             userstore::mkdir(saveFolder);
-            savePath_ = saveFolder / entry.path.filename();savePath_.replace_extension(format==SaveFormat::Sav?".sav":".json");
+            savePath_ = saveFolder / romStem_;
+            savePath_ += format==SaveFormat::Sav?".sav":".json";
             mapPath_=savePath_;mapPath_.replace_extension(".map.json");
-            stateFolder_ = saveFolder.parent_path() / "states" / entry.sha;
+            stateFolder_ = saveFolder.parent_path() / "states";
             batterySaved_=userstore::exists(savePath_);
             fs::path source=savePath_;
             if(!batterySaved_) {
@@ -350,6 +361,37 @@ void Session::reorderRoster(unsigned first,unsigned second,bool move) {
     if(move) {
         for(unsigned at=first;at!=second;) {const unsigned next=at<second?at+1:at-1;swapRosterRecords(updated,scenario_,at,next);at=next;}
     } else swapRosterRecords(updated,scenario_,first,second);
+    commitRoster(original,updated);
+    reset();skipManufacturer();
+}
+bool Session::supportsRosterIdentity() const {return enhanced_&&structuredSave_;}
+int Session::rosterIdentity(unsigned slot, RosterField field) const {
+    if(!supportsRosterIdentity()||slot<1||slot>20)return -1;
+    std::array<uint8_t,8192> data{};
+    if(!wiiz_core_sram_read(core_,data.data(),data.size()))return -1;
+    const auto* record=data.data()+rosterRecordOffset(scenario_,slot);
+    const auto [offset,shift]=rosterIdentityBits(scenario_,field);
+    return record[0]?((record[offset]>>shift)&7):-1;
+}
+void Session::setRosterIdentity(unsigned slot, RosterField field, unsigned value) {
+    if(!supportsRosterIdentity())throw std::runtime_error("Race and class editing requires a supported ROM.");
+    const bool race=field==RosterField::Race;
+    if(slot<1||slot>20||value>=(race?5u:8u))throw std::runtime_error("Invalid roster identity edit");
+    std::vector<uint8_t> original(8192);
+    if(!wiiz_core_sram_read(core_,original.data(),original.size()))throw std::runtime_error("Cannot read roster");
+    const size_t start=rosterRecordOffset(scenario_,slot);
+    if(!original[start])throw std::runtime_error("This roster slot is empty");
+    const auto [offset,shift]=rosterIdentityBits(scenario_,field);
+    const size_t index=start+offset;
+    const unsigned mask=7u<<shift;
+    const unsigned bits=value<<shift;
+    if((original[index]&mask)==bits)return;
+    auto updated=original;
+    updated[index]=uint8_t((updated[index]&~mask)|bits);
+    repairBattery(updated,scenario_);
+    commitRoster(original,updated);
+}
+void Session::commitRoster(std::vector<uint8_t>& original,std::vector<uint8_t>& updated) {
     save();
     if(!savePath_.empty()) {
         const auto dir=savePath_.parent_path()/"backups"/savePath_.stem();userstore::mkdir(dir);
@@ -358,7 +400,6 @@ void Session::reorderRoster(unsigned first,unsigned second,bool move) {
     }
     if(!wiiz_core_sram_write(core_,updated.data(),updated.size()))throw std::runtime_error("Cannot update roster");
     try {save();}catch(...){wiiz_core_sram_write(core_,original.data(),original.size());throw;}
-    reset();skipManufacturer();
 }
 void Session::battleMultipliers(unsigned experience, unsigned gold) {
     if (!enhanced_) return;
@@ -500,11 +541,16 @@ void restorePart(WiizCore* core,const Json& part) {
 fs::path Session::statePath(unsigned slot) const {
     if(slot<1||slot>5)throw std::runtime_error("State slot must be 1..5");
     if(stateFolder_.empty())throw std::runtime_error("State folder is unavailable");
-    return stateFolder_ / ("slot"+std::to_string(slot)+".json");
+    auto path = stateFolder_ / romStem_;
+    path += ".stot" + std::to_string(slot) + ".state";
+    return path;
+}
+fs::path Session::legacyStatePath(unsigned slot) const {
+    return stateFolder_ / sha_ / ("slot" + std::to_string(slot) + ".json");
 }
 bool Session::hasState(unsigned slot) const {
     if(stateFolder_.empty())return false;
-    try {return userstore::exists(statePath(slot));}catch(...){return false;}
+    try {return userstore::exists(statePath(slot)) || userstore::exists(legacyStatePath(slot));}catch(...){return false;}
 }
 void Session::saveState(unsigned slot) {
     const auto path=statePath(slot);userstore::mkdir(path.parent_path());
@@ -518,7 +564,8 @@ void Session::saveState(unsigned slot) {
     userstore::write(path,text.data(),text.size());
 }
 void Session::loadState(unsigned slot) {
-    const auto data=readBytes(statePath(slot),16*1024*1024);
+    const auto path = statePath(slot);
+    const auto data = readBytes(userstore::exists(path) ? path : legacyStatePath(slot), 16*1024*1024);
     const auto doc=Json::parse(data.begin(),data.end());
     if(doc.at("format")!="wiiz-state"||doc.at("version")!=1||doc.at("rom_sha256")!=sha_||doc.at("core_revision")!="binjnes-e2f5871-wiiz-state1")
         throw std::runtime_error("State format/version/ROM does not match");

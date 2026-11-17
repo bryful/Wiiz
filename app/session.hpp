@@ -62,6 +62,10 @@ public:
     bool canSwapRoster() const;
     void swapRoster(unsigned first, unsigned second);
     void moveRoster(unsigned first, unsigned last);
+    enum class RosterField { Race, Class };
+    bool supportsRosterIdentity() const;
+    int rosterIdentity(unsigned slot, RosterField field) const;
+    void setRosterIdentity(unsigned slot, RosterField field, unsigned value);
     void rosterBonus(unsigned slot, unsigned kind, uint64_t amount);
     WiizCore* core() { return core_; }
     std::array<uint32_t, 256 * 240> pixels{};
@@ -76,6 +80,7 @@ private:
     void startMusic();
     std::filesystem::path savePath_;
     std::filesystem::path stateFolder_;
+    std::filesystem::path romStem_;
     std::string sha_;
     int scenario_ = 0;
     size_t rosterFontOffset_ = 0;
@@ -95,5 +100,7 @@ private:
     std::filesystem::path turboFilePath_;
     std::vector<uint8_t> previousTurboFile_;
     void reorderRoster(unsigned first, unsigned last, bool move);
+    void commitRoster(std::vector<uint8_t>& original, std::vector<uint8_t>& updated);
     std::filesystem::path statePath(unsigned slot) const;
+    std::filesystem::path legacyStatePath(unsigned slot) const;
 };
