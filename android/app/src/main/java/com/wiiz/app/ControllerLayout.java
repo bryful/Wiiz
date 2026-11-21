@@ -19,7 +19,7 @@ final class ControllerLayout {
             screen=new int[]{Math.round((w-sw)/2),Math.round(top+g),Math.round(sw),Math.round(sh)};
             put(-1,g,0,w*.22f,top);put(8,w-w*.22f-g,0,w*.22f,top);
             float secondary=top+g+sh+g;
-            put(12,g,secondary,w*.25f,small);put(11,w-w*.25f-g,secondary,w*.25f,small);
+            put(12,g,secondary,w*.25f,small);put(14,w*.375f,secondary,w*.25f,small);put(11,w-w*.25f-g,secondary,w*.25f,small);
             float controlsTop=secondary+small+g,controlsBottom=h-bottom-g*2;
             float available=controlsBottom-controlsTop;
             float key=Math.min(Math.min(w*.175f,94*density),available/3.15f);
@@ -46,7 +46,7 @@ final class ControllerLayout {
             float left=rightStart+side*.05f,right=rightStart+side*.52f,cluster=h*.34f;
             put(6,left,cluster+h*.05f,diameter,diameter);put(7,right,cluster,diameter,diameter);
             put(5,left,cluster+h*.29f,diameter,diameter);put(4,right,cluster+h*.24f,diameter,diameter);
-            put(12,rightStart+g,g,side-2*g,small);put(11,rightStart+g,h-small-g,side-2*g,small);
+            put(12,rightStart+g,g,side-2*g,small);put(14,rightStart+g,small+3*g,side-2*g,small);put(11,rightStart+g,h-small-g,side-2*g,small);
         }
     }
 }

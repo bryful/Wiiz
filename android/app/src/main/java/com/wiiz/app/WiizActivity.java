@@ -198,7 +198,7 @@ public class WiizActivity extends SDLActivity {
         RelativeLayout.LayoutParams surface=new RelativeLayout.LayoutParams(box[2],box[3]);
         surface.leftMargin=safeLeft+box[0];surface.topMargin=safeTop+box[1];
         mSurface.setLayoutParams(surface);
-        String[] labels={"↑","↓","←","→","A","B","SEL","STA","設定","SAVE 1","LOAD 1","マップ","リセット"};
+        String[] labels={"↑","↓","←","→","A","B","SEL","STA","設定","SAVE 1","LOAD 1","マップ","リセット","再読込","アイテム"};
         for(java.util.Map.Entry<Integer,int[]> entry:layout.buttons.entrySet()){
             int action=entry.getKey();int[] b=entry.getValue();
             View view=action==-1?importButton:keyButton(labels[action],action);

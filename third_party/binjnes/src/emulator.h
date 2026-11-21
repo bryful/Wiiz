@@ -410,6 +410,8 @@ Result emulator_write_state_to_file(Emulator*, const char* filename);
 Result emulator_read_prg_ram_from_file(Emulator*, const char* filename);
 Result emulator_write_prg_ram_to_file(Emulator*, const char* filename);
 
+/* For isolated native ROM calls. */
+void emulator_suspend_vblank_nmi(Emulator*);
 EmulatorEvent emulator_step(Emulator*);
 EmulatorEvent emulator_run_until(Emulator*, Ticks until_ticks);
 void emulator_set_reset(Emulator*, bool set);

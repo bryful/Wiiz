@@ -9,13 +9,14 @@
 Windows版・Android版の配布物と導入・操作方法はWiiz_appに掲載しています。このリポジトリはソースコードの公開用です。
 
 ゲームROMは付属しません。ご自身で利用する権利のある対応ROM（`.nes`）を用意してください。
-現在のバージョンは0.1.0です。対応ROMや機能ごとの検証範囲には制限があります。
+現在のバージョンは0.1.2です。対応ROMや機能ごとの検証範囲には制限があります。
 
 ## 開発・操作資料
 
 - [Windowsビルド・操作方法](docs/native-app.md)
 - [Androidビルド](docs/android.md)
 - [設定](docs/settings.md)・[ゲームパッド](docs/gamepad.md)
+- [アイテム編集](docs/item-editor.md)
 - [セーブ](docs/save-data.md)・[ターボファイル](docs/turbofile.md)
 - [探索済みマップ](docs/spell-map.md)・[補助機能](docs/difficulty.md)
 - [ROM識別と検証範囲](docs/rom-identification.md)

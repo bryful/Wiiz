@@ -6,6 +6,7 @@
 #include "save_json.hpp"
 #include "spell_map_view.hpp"
 #include "ui_text.hpp"
+#include "item_editor.hpp"
 #include "platform_text.hpp"
 #include "crt_filter.hpp"
 #include "gamepad_input.hpp"
@@ -44,7 +45,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_wiiz_app_WiizActivity_touchKey(JNIEnv*, jclass, jint action, jboolean down) {
     static constexpr SDL_Keycode keys[] = {
         SDLK_UP, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT, SDLK_X, SDLK_Z,
-        SDLK_A, SDLK_S, SDLK_Q, SDLK_F1, SDLK_F1, SDLK_M, SDLK_ESCAPE, SDLK_F6
+        SDLK_A, SDLK_S, SDLK_Q, SDLK_F1, SDLK_F1, SDLK_M, SDLK_ESCAPE, SDLK_F6, SDLK_I
     };
     if (action < 0 || action >= int(sizeof(keys) / sizeof(keys[0]))) return;
     SDL_Event event{};
@@ -65,8 +66,8 @@ int assistsCheck(const char* romPath,const char* folderPath);
 int difficultyCheck(const char* romPath,const char* folderPath);
 int storageCheck(const char* romPath,const char* folderPath);
 int spellMapPrepare(const char* romPath,const char* folderPath);
-enum class MenuPage {Root,States,Display,Storage,Difficulty,Roster,Identity};
-enum class MenuAction {Back,Resume,States,Display,Storage,Games,Folder,Exit,Crt,Speed,Format,Maker,Slot,Difficulty,Character,Amount,Experience,Gold,Spells,Assist,Roster,RosterEntry,TurboFile,BugFix,Alignment,BattleMultiplier,Race,Class,SetIdentity};
+enum class MenuPage {Root,States,Display,Storage,Difficulty,Roster,Identity,Items};
+enum class MenuAction {Back,Resume,States,Display,Storage,Games,Folder,Exit,Crt,Speed,Format,Maker,Slot,Difficulty,Character,Amount,Experience,Gold,Spells,Assist,Roster,RosterEntry,TurboFile,BugFix,Alignment,BattleMultiplier,Race,Class,SetIdentity,Items};
 constexpr const char* raceNames[]={"Human","Elf","Dwarf","Gnome","Hobbit"};
 constexpr const char* classNames[]={"Fighter","Mage","Priest","Thief","Bishop","Samurai","Lord","Ninja"};
 struct MenuItem {std::string label;MenuAction action;unsigned slot=0;};
@@ -326,9 +327,15 @@ static int checks(int argc, char** argv) {
 
 int bugFixCheck(const char*,const char*);
 int initialHpCheck(const char*,const char*);
+int itemsCheck(const char*,const char*);
+int itemsScenesCheck(const char*,const char*);
+int itemsBattleCheck(const char*,const char*);
 int creationHpMenuCheck(const char*,const char*);
 int main(int argc, char** argv) {
     try {
+        if (argc == 4 && std::string(argv[1]) == "--items-battle-check") return itemsBattleCheck(argv[2],argv[3]);
+        if (argc == 4 && std::string(argv[1]) == "--items-scenes-check") return itemsScenesCheck(argv[2],argv[3]);
+        if (argc == 4 && std::string(argv[1]) == "--items-check") return itemsCheck(argv[2],argv[3]);
         if (argc == 4 && std::string(argv[1]) == "--creation-hp-check") return creationHpMenuCheck(argv[2],argv[3]);
         if (argc == 4 && std::string(argv[1]) == "--initial-hp-check") return initialHpCheck(argv[2],argv[3]);
         if (argc == 4 && std::string(argv[1]) == "--bugfix-check") return bugFixCheck(argv[2],argv[3]);
@@ -356,7 +363,7 @@ int main(int argc, char** argv) {
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) throw std::runtime_error(SDL_GetError());
         GamepadInput gamepads;
         SDL_Window* window = nullptr; SDL_Renderer* renderer = nullptr;
-        if (!SDL_CreateWindowAndRenderer("Wiiz", 1024, 860, SDL_WINDOW_RESIZABLE, &window, &renderer)) throw std::runtime_error(SDL_GetError());
+        if (!SDL_CreateWindowAndRenderer("Wiiz " WIIZ_VERSION, 1024, 860, SDL_WINDOW_RESIZABLE, &window, &renderer)) throw std::runtime_error(SDL_GetError());
         setAppWindowIcon(window);
         SDL_SetRenderLogicalPresentation(renderer, 1024, 860, SDL_LOGICAL_PRESENTATION_LETTERBOX);
         FileLabelRenderer filenames(renderer);
@@ -454,6 +461,7 @@ int main(int argc, char** argv) {
         int stateSaves = 0, stateLoads = 0, stateErrors = 0, bonusActions = 0, rosterSwaps = 0;
         bool running = true, menu = false, pending = false, focused = true;
         bool stateLoadChoice = false;MenuPage menuPage=MenuPage::Root;
+        ItemEditor itemEditor;
         auto identityField=Session::RosterField::Race;
         int identityMenuReturn=0;
         unsigned bonusSlot=1,bonusAmount=1,rosterPicked=0;
@@ -479,7 +487,7 @@ int main(int argc, char** argv) {
             if(menuPage==MenuPage::Root) {
                 if(game)items={{"Resume game",MenuAction::Resume},{"State save / load  >",MenuAction::States},
                     {"Display / speed  >",MenuAction::Display},{"Save / startup  >",MenuAction::Storage},
-                    {"Game selection",MenuAction::Games},{"Select ROM folder",MenuAction::Folder},{"Exit application",MenuAction::Exit},{"Difficulty / bonuses  >",MenuAction::Difficulty},{"Roster order (title only)  >",MenuAction::Roster}};
+                    {"Game selection",MenuAction::Games},{"Select ROM folder",MenuAction::Folder},{"Exit application",MenuAction::Exit},{"Difficulty / bonuses  >",MenuAction::Difficulty},{"Roster order (title only)  >",MenuAction::Roster},{"Party items  >",MenuAction::Items}};
                 else items={{"Display / speed  >",MenuAction::Display},{"Save / startup  >",MenuAction::Storage},
                     {"Select ROM folder",MenuAction::Folder},{"Rescan ROM folder",MenuAction::Games},{"Exit application",MenuAction::Exit}};
             } else {
@@ -560,7 +568,7 @@ int main(int argc, char** argv) {
 #ifdef SDL_PLATFORM_ANDROID
             androidGameActive = true;
 #endif
-            SDL_SetWindowTitle(window, ("Wiiz / " + entry.title + " / " + utf8(entry.path.filename())).c_str());
+            SDL_SetWindowTitle(window, ("Wiiz " WIIZ_VERSION " / " + entry.title + " / " + utf8(entry.path.filename())).c_str());
             status = !entry.identity.knownLayout ? "Wiz program recognized. Unverified code revision: 1x / raw battery SRAM." : stream ? "" : "Audio device unavailable; running without sound.";
         };
         scan();
@@ -571,7 +579,7 @@ int main(int argc, char** argv) {
         auto stateAction = [&](unsigned slot, bool load) {
             if (!game) { status = "Select a game before using state slots."; return; }
             try {
-                if (load) { game->loadState(slot); silence(); ++stateLoads; }
+                if (load) { game->loadState(slot); silence(); ++stateLoads; if(menuPage==MenuPage::Items){menu=false;menuPage=MenuPage::Root;} }
                 else { game->saveState(slot); userstore::flush(); ++stateSaves; }
                 status = std::string(load ? "Loaded" : "Saved") + " state slot " + std::to_string(slot) + ".";
             } catch (const std::exception& ex) { status = ex.what(); ++stateErrors; }
@@ -652,6 +660,7 @@ int main(int argc, char** argv) {
                 }
                 if(menu && e.type==SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button==SDL_BUTTON_LEFT){
                     SDL_Event pointer=e;SDL_ConvertEventToRenderCoordinates(renderer,&pointer);
+                    if(menuPage==MenuPage::Items&&game){try{itemEditor.click(*game,pointer.button.x,pointer.button.y);}catch(const std::exception& ex){status=ex.what();}continue;}
                     const auto items=menuItems();
                     const int first=std::clamp(menuChoice-2,0,std::max(0,int(items.size())-6));
                     const int row=int((pointer.button.y-166)/88);
@@ -698,6 +707,7 @@ int main(int argc, char** argv) {
                 }
                 if (key == SDLK_Q) { menu = !menu; menuPage=MenuPage::Root;menuChoice = 0; stateLoadChoice = false; silence(); continue; }
                 if (menu) {
+                    if(menuPage==MenuPage::Items){try{if(!itemEditor.key(*game,key)){menu=false;silence();}}catch(const std::exception& ex){status=ex.what();}continue;}
                     if(key==SDLK_Z){
                         if(menuPage==MenuPage::Roster&&rosterPicked){menuChoice=int(rosterPicked)-1;resetRosterOrder();status="Move cancelled.";}
                         else backMenu();continue;
@@ -734,6 +744,7 @@ int main(int argc, char** argv) {
                             const unsigned next=assistMask^item.slot;game->assists(next);assistMask=next;
                             if(!smoke){std::ofstream out(prefs/"assists.txt");out<<assistMask<<'\n';}
                             status=item.slot==16?((next&16)?"Maximum bonus applies to the next character you create.":"Original bonus generation applies to the next character you create."):"Assist setting changed. Learned spells and original casting restrictions still apply.";break;}
+                        case MenuAction::Items:itemEditor.open(*game);menuPage=MenuPage::Items;menuChoice=0;silence();status="";break;
                         case MenuAction::Roster:menuPage=MenuPage::Roster;menuChoice=0;resetRosterOrder();status=game->canSwapRoster()?"Choose a character with Up/Down and X/Enter.":"Reset first; open Q at the title before pressing game buttons.";break;
                         case MenuAction::RosterEntry:break;
                         case MenuAction::Difficulty:menuPage=MenuPage::Difficulty;menuChoice=1;break;
@@ -771,7 +782,7 @@ int main(int argc, char** argv) {
                         case MenuAction::States:menuPage=MenuPage::States;menuChoice=1;stateLoadChoice=false;break;
                         case MenuAction::Display:menuPage=MenuPage::Display;menuChoice=1;break;
                         case MenuAction::Storage:menuPage=MenuPage::Storage;menuChoice=1;break;
-                        case MenuAction::Games:save();userstore::flush();game.reset();silence();menu=false;menuPage=MenuPage::Root;scan();SDL_SetWindowTitle(window,"Wiiz / Game selection");break;
+                        case MenuAction::Games:save();userstore::flush();game.reset();silence();menu=false;menuPage=MenuPage::Root;scan();SDL_SetWindowTitle(window,"Wiiz " WIIZ_VERSION " / Game selection");break;
                         case MenuAction::Folder:silence();pending=true;SDL_ShowOpenFolderDialog(folderSelected,nullptr,window,utf8(folder).c_str(),false);break;
                         case MenuAction::Exit:save();userstore::flush();running=false;break;
                         case MenuAction::Slot:stateAction(item.slot,stateLoadChoice);break;
@@ -801,7 +812,8 @@ int main(int argc, char** argv) {
                         if (key == SDLK_DOWN) chosen = (chosen + 1) % int(entries.size());
                         if (key == SDLK_X) { try { launch(entries[chosen], !smoke); } catch (const std::exception& ex) { status = ex.what(); } }
                     }
-                } else if(game->spellMap().mode) {game->mapKey(key==SDLK_M&&game->spellMap().mode==3?PAD_B:button(key));if(game->spellMap().mode){sourcePressed.insert(e.key.key);updateHeld();}else{pressed.clear();padPressed.clear();held=0;}}
+                } else if(key==SDLK_I){try{silence();itemEditor.open(*game);menu=true;menuPage=MenuPage::Items;status="";}catch(const std::exception& ex){status=ex.what();}}
+                else if(game->spellMap().mode) {try{game->mapKey(key==SDLK_M&&game->spellMap().mode==3?PAD_B:button(key));}catch(const std::exception& ex){status=ex.what();silence();menu=true;}if(game->spellMap().mode){sourcePressed.insert(e.key.key);updateHeld();}else{pressed.clear();padPressed.clear();held=0;}}
                 else if(key==SDLK_M){silence();game->openMap();}
                 else {sourcePressed.insert(e.key.key);updateHeld();}
             }
@@ -877,7 +889,8 @@ int main(int argc, char** argv) {
                 wizText(renderer,nullptr,70,756,"TAP A FILENAME TO PLAY",3);
 
             }
-            if(menu) {
+            if(menu && menuPage==MenuPage::Items && game)itemEditor.draw(renderer,*game);
+            if(menu && menuPage!=MenuPage::Items) {
                 const auto items=menuItems();
                 constexpr int visible=6;constexpr float rowHeight=88, rowTop=166;
                 const int first=std::clamp(menuChoice-2,0,std::max(0,int(items.size())-visible));

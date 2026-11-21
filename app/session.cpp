@@ -279,7 +279,7 @@ void Session::openMap() {
     const unsigned p=wiiz_core_map_position(core_);
     const int x=p&255,y=(p>>8)&255,f=(p>>16)&255;
     if(x>=20||y>=20||f<1||f>int(dungeon_.floors.size()))return;
-    // Mode 3 is a host viewer: no spell, MP write, or ROM resume button.
+    // Mode 3 is host navigation, separate from the original MALOR spell.
     spellMap_={3,f,x,y,int((p>>24)&3),f,x,y};
     releaseInput();
 }
@@ -446,7 +446,7 @@ void Session::rosterBonus(unsigned slot,unsigned kind,uint64_t amount) {
 void Session::mapKey(unsigned button) {
     if(!spellMap_.mode)return;
     auto& m=spellMap_;
-    if(m.mode==2) {
+    if(m.mode==2||m.mode==3) {
         if(m.targetFloor>0) {
             if(button==PAD_UP)m.targetY=(m.targetY+1)%20;
             if(button==PAD_DOWN)m.targetY=(m.targetY+19)%20;
@@ -458,6 +458,10 @@ void Session::mapKey(unsigned button) {
         if(m.targetFloor==0)m.targetX=m.targetY=0;
     }
     if(button==PAD_A||button==PAD_B) {
+        if(m.mode==3&&button==PAD_A) {
+            if(!wiiz_core_map_warp(core_,m.targetFloor,m.targetX,m.targetY))throw std::runtime_error("Map movement is only available while exploring the dungeon");
+            wiiz_core_pixels(core_,pixels.data());
+        }
         if(m.mode==2&&button==PAD_A)wiiz_core_map_destination(core_,m.targetX-m.x,m.targetY-m.y,m.targetFloor-m.floor);
         mapButton_=m.mode==3?0:button;mapResume_=m.mode==3?0:6;m.mode=0;previousHeld_=0;wiiz_core_input(core_,0);
     }
@@ -621,4 +625,147 @@ void Session::skipManufacturer() {
     for(unsigned i=0;i<900&&!wiiz_core_title_ready(core_);++i)
         if(!wiiz_core_frame(core_))throw std::runtime_error("Startup stopped");
     wiiz_core_pixels(core_,pixels.data());previousHeld_=0;
+}
+
+namespace {
+size_t inventoryOffset(unsigned scenario,unsigned slot) {
+    return scenario==1?(slot-1)*256:0x400+(slot-1)*96;
+}
+unsigned inventoryCountOffset(unsigned scenario){return scenario==1?0x5c:0x53;}
+unsigned inventoryFlagsOffset(unsigned scenario){return scenario==1?0x4c:0x43;}
+unsigned inventoryLimit(unsigned scenario){return scenario==1?101:scenario==2?110:138;}
+}
+std::vector<Session::InventoryMember> Session::openItems() {
+    if(!enhanced_||!structuredSave_)throw std::runtime_error("Item editor requires a verified ROM.");
+    const size_t trainer=(rom_[6]&4)?512:0;
+    auto signature=[&](size_t at,std::initializer_list<uint8_t> bytes){return at+trainer+bytes.size()<=rom_.size()&&std::equal(bytes.begin(),bytes.end(),rom_.begin()+at+trainer);};
+    if((scenario_==1&&!signature(0x1ae7f,{0xa6,0x4e,0xbd,0xdc,0x7d}))||
+       (scenario_==2&&(!signature(0x1bdfd,{0xa6,0x0b,0xa0,0x22})||!signature(0x1d06a,{0xa9,0x0a,0x85,0x02})))||
+       (scenario_==3&&(!signature(0x19e4d,{0xa6,0x0b,0xa0,0x22})||!signature(0x1d06c,{0xa9,0x0a,0x85,0x02}))))
+        throw std::runtime_error("Unverified equipment routines in this ROM.");
+    if(!wiiz_core_items_pause(core_))throw std::runtime_error("Items are unavailable during battle or an unfinished inventory transfer.");
+    releaseInput();wiiz_core_pixels(core_,pixels.data());
+    std::array<uint8_t,8192> ram{};
+    if(!wiiz_core_sram_read(core_,ram.data(),ram.size()))throw std::runtime_error("Cannot read inventory");
+    unsigned count=ram[scenario_==1?0x1def:0xb81],list=scenario_==1?0x1ddc:0xb82;
+    if(!count||count>6)throw std::runtime_error("A party of 1..6 is required.");
+    std::vector<InventoryMember> result;
+    for(unsigned n=0;n<count;++n) {
+        unsigned ref=ram[list+n];
+        if(scenario_==1){if(ref<0x60)throw std::runtime_error("Invalid party reference");ref-=0x60;}
+        if(ref>=20||std::any_of(result.begin(),result.end(),[&](const auto& m){return m.slot==ref+1;}))throw std::runtime_error("Invalid party reference");
+        const auto* c=ram.data()+inventoryOffset(scenario_,ref+1);
+        unsigned size=c[inventoryCountOffset(scenario_)],flags=inventoryFlagsOffset(scenario_);
+        if(!c[0]||size>8)throw std::runtime_error("Invalid inventory record");
+        InventoryMember member{ref+1,{}};
+        for(unsigned i=0;i<size;++i){if(c[flags+8+i]>=inventoryLimit(scenario_))throw std::runtime_error("Unverified item ID");member.items.push_back({c[flags+8+i],c[flags+i]});}
+        result.push_back(std::move(member));
+    }
+    return result;
+}
+std::vector<uint8_t> Session::itemNameCodes(InventoryItem item) const {
+    if(item.id>=inventoryLimit(scenario_))return {};
+    const size_t trainer=(rom_[6]&4)?512:0;
+    auto byte=[&](size_t at){return rom_.at(at+trainer);};
+    auto word=[&](size_t at){return unsigned(byte(at))|(unsigned(byte(at+1))<<8);};
+    bool unknown=(item.flags&32)!=0;std::vector<uint8_t> result;
+    if(scenario_==1) {
+        unsigned ptr=word((unknown?0xb010:0xb0da)+item.id*2);
+        if(ptr<0x8000||ptr>=0xc000)throw std::runtime_error("Unverified item name pointer");
+        size_t at=0x8010+ptr-0x8000;
+        for(unsigned i=0;i<48;++i){auto b=byte(at+i);if(b==255)return result;result.push_back(b);}
+    } else if(scenario_==2) {
+        unsigned ptr=word(0x10010+item.id*2);
+        if(ptr<0x8000||ptr>=0xc000)throw std::runtime_error("Unverified item pointer");
+        size_t at=0x10010+ptr-0x8000;
+        if(unknown){ptr=word(at+32);if(ptr<0x8000||ptr>=0xc000)throw std::runtime_error("Unverified item name pointer");at=0x10010+ptr-0x8000;}
+        for(unsigned i=0;i<16;++i){auto b=byte(at+16+i);if(!b)break;result.push_back(b);}return result;
+    } else {
+        unsigned ptr=word(0x10010+item.id*31+(unknown?2:0));
+        if(ptr<0x8000||ptr>=0xc000)throw std::runtime_error("Unverified item name pointer");
+        size_t at=0x10010+ptr-0x8000;
+        for(unsigned i=0;i<96;++i){if(!byte(at+i)){at+=i+1;break;}if(i==95)throw std::runtime_error("Unterminated item name");}
+        for(unsigned i=0;i<48;++i){auto b=byte(at+i);if(!b)return result;result.push_back(b);}
+    }
+    throw std::runtime_error("Unterminated item name");
+}
+std::vector<uint8_t> Session::textPixels(const std::vector<uint8_t>& codes) const {
+    std::vector<uint8_t> bitmap(codes.size()*64);
+    for(size_t i=0;i<codes.size();++i) {
+        size_t at=rosterFontOffset_+codes[i]*16;
+        if(at+8>rom_.size())throw std::runtime_error("Invalid font glyph");
+        for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x)bitmap[y*codes.size()*8+i*8+x]=(rom_[at+y]>>(7-x))&1;
+    }
+    return bitmap;
+}
+void Session::equipItem(InventoryMember& member,unsigned index) const {
+    if(index>=member.items.size())throw std::runtime_error("Empty inventory slot");
+    auto& selected=member.items[index];
+    if(selected.flags&64)throw std::runtime_error("Cursed equipment cannot be changed.");
+    if(selected.flags&128){selected.flags&=127;return;}
+    if(selected.flags&32)throw std::runtime_error("Identify this item first.");
+    std::array<uint8_t,8192> ram{};
+    if(!wiiz_core_sram_read(core_,ram.data(),ram.size()))throw std::runtime_error("Cannot read character");
+    const auto* c=ram.data()+inventoryOffset(scenario_,member.slot);
+    unsigned cls=scenario_==1?(c[11]&7):((c[10]>>2)&7),align=c[scenario_==1?12:10]&3;
+    size_t trainer=(rom_[6]&4)?512:0;
+    auto stats=[&](unsigned id) {
+        size_t at;
+        if(scenario_==1)at=0x10110+id*64+34;
+        else if(scenario_==2){size_t p=0x10010+id*2+trainer;unsigned ptr=rom_.at(p)|(unsigned(rom_.at(p+1))<<8);if(ptr<0x8000||ptr>=0xc000)throw std::runtime_error("Invalid item pointer");at=0x10010+ptr-0x8000+34;}
+        else at=0x10010+id*31+4;
+        return at+trainer;
+    };
+    size_t at=stats(selected.id);unsigned kind=rom_.at(at);
+    if(kind>5||!(rom_.at(at+(scenario_==1?14:13))&(1u<<cls)))throw std::runtime_error("This character cannot equip this item.");
+    for(unsigned i=0;i<member.items.size();++i)if(i!=index&&(member.items[i].flags&128)&&rom_.at(stats(member.items[i].id))==kind) {
+        if(member.items[i].flags&64)throw std::runtime_error("Remove curse before replacing equipment.");
+    }
+    for(unsigned i=0;i<member.items.size();++i)if(i!=index&&(member.items[i].flags&128)&&rom_.at(stats(member.items[i].id))==kind)member.items[i].flags&=127;
+    bool aligned=scenario_==1?(rom_.at(at+1)&(1u<<align))!=0:(rom_.at(at+1)>=128||rom_.at(at+1)==align);
+    selected.flags|=uint8_t(128|((rom_.at(at+2)||!aligned)?64:0));
+}
+void Session::updateItems(const std::vector<InventoryMember>& before,const std::vector<InventoryMember>& after) {
+    if(!enhanced_||!structuredSave_||before.empty()||before.size()>6||before.size()!=after.size())throw std::runtime_error("Invalid inventory update");
+    if(before==after)return;
+    std::vector<uint8_t> original(8192);
+    if(!wiiz_core_sram_read(core_,original.data(),original.size()))throw std::runtime_error("Cannot read inventory");
+    const bool liveStats=wiiz_core_items_stats_live(core_)!=0;
+    auto updated=original;unsigned countAt=scenario_==1?0x1def:0xb81,list=scenario_==1?0x1ddc:0xb82;
+    if(original[countAt]!=before.size())throw std::runtime_error("Party changed; reopen Items.");
+    for(unsigned n=0;n<before.size();++n) {
+        const auto& a=before[n];const auto& b=after[n];
+        if(a.slot<1||a.slot>20||a.slot!=b.slot||b.items.size()>8||original[list+n]!=(scenario_==1?0x60:0)+a.slot-1)throw std::runtime_error("Party changed; reopen Items.");
+        unsigned base=unsigned(inventoryOffset(scenario_,a.slot)),flags=inventoryFlagsOffset(scenario_);
+        if(original[base+inventoryCountOffset(scenario_)]!=a.items.size())throw std::runtime_error("Inventory changed; reopen Items.");
+        for(unsigned i=0;i<a.items.size();++i)if(original[base+flags+i]!=a.items[i].flags||original[base+flags+8+i]!=a.items[i].id)throw std::runtime_error("Inventory changed; reopen Items.");
+        if(a==b)continue;
+        updated[base+inventoryCountOffset(scenario_)]=uint8_t(b.items.size());
+        for(unsigned i=0;i<8;++i){if(i<b.items.size()&&b.items[i].id>=inventoryLimit(scenario_))throw std::runtime_error("Invalid item ID");updated[base+flags+i]=i<b.items.size()?b.items[i].flags:0;updated[base+flags+8+i]=i<b.items.size()?b.items[i].id:255;}
+    }
+    if(updated==original)return;
+    std::vector<uint8_t> state(wiiz_core_state_size(core_));
+    if(!wiiz_core_state_write(core_,state.data(),state.size()))throw std::runtime_error("Cannot snapshot inventory");
+    std::unique_ptr<WiizCore,decltype(&wiiz_core_delete)> clone(wiiz_core_new(rom_.data(),rom_.size()),wiiz_core_delete);
+    if(!clone||!wiiz_core_state_read(clone.get(),state.data(),state.size()))throw std::runtime_error("Cannot clone NES core");
+    wiiz_core_profile(clone.get(),scenario_);
+    if(!wiiz_core_sram_write(clone.get(),updated.data(),updated.size()))throw std::runtime_error("Cannot prepare inventory");
+    for(unsigned n=0;n<after.size();++n)if(!wiiz_core_items_recalculate(clone.get(),n))throw std::runtime_error("Original equipment recalculation failed; no changes saved.");
+    std::vector<uint8_t> computed(8192);
+    if(!wiiz_core_sram_read(clone.get(),computed.data(),computed.size()))throw std::runtime_error("Cannot read recalculated inventory");
+    for(const auto& member:after) {
+        auto base=inventoryOffset(scenario_,member.slot);
+        updated[base+(scenario_==1?0x28:0x26)]=computed[base+(scenario_==1?0x28:0x26)];
+        if(scenario_!=1)updated[base+0x59]=computed[base+0x59];
+    }
+    if(scenario_==1&&liveStats) {
+        for(unsigned at:{0x1ad6u,0x1adcu,0x1ae2u,0x1b0cu,0x1b36u,0x1b60u,0x1b8au,0x1d82u,0x1d88u,0x1d8eu,0x1db2u,0x1db8u,0x1dd0u})
+            std::copy_n(computed.begin()+at,6,updated.begin()+at);
+    }
+    repairBattery(updated,scenario_);
+    try {
+        commitRoster(original,updated);
+        if(!wiiz_core_items_sync(core_,original.data(),updated.data(),updated.size()))throw std::runtime_error("Cannot synchronize original item menu");
+        if(liveStats&&!wiiz_core_items_merge(core_,clone.get()))throw std::runtime_error("Cannot apply derived equipment stats");
+    } catch(...) {wiiz_core_state_read(core_,state.data(),state.size());previousSave_.clear();batterySaved_=false;throw;}
 }

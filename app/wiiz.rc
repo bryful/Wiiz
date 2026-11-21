@@ -1,1 +1,25 @@
 101 ICON "../assets/wiiz.ico"
+
+#include <winver.h>
+
+1 VERSIONINFO
+ FILEVERSION WIIZ_VERSION_TUPLE
+ PRODUCTVERSION WIIZ_VERSION_TUPLE
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Wiiz"
+            VALUE "FileVersion", WIIZ_VERSION
+            VALUE "ProductName", "Wiiz"
+            VALUE "ProductVersion", WIIZ_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

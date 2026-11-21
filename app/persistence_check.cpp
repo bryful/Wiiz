@@ -3,6 +3,7 @@
 #include "save_json.hpp"
 #include "json.hpp"
 #include "picosha2.h"
+#include "item_editor.hpp"
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -243,9 +244,30 @@ int difficultyCheck(const char* romPath,const char* folderPath) {
     std::vector<uint8_t> before(8192),after(8192);wiiz_core_sram_read(session.core(),before.data(),before.size());
     const auto position=session.positionText();require(!position.empty(),"Missing position");
     session.openMap();require(session.spellMap().mode==3,"Host map did not open");
+    const auto mapStart=session.spellMap();
+    session.mapKey(PAD_RIGHT);session.mapKey(PAD_UP);
+    require(session.spellMap().targetX==(mapStart.targetX+1)%20&&session.spellMap().targetY==(mapStart.targetY+1)%20,"Host map cursor did not move");
+    session.mapKey(PAD_START);require(session.spellMap().targetFloor==mapStart.targetFloor+1,"Host map floor did not change");
+    session.mapKey(PAD_SELECT);
+    require(session.positionText()==position,"Host map browsing moved party");
     session.saveState(5);session.loadState(5);require(session.spellMap().mode==3,"Host map state lost");
-    session.mapKey(PAD_A);require(session.spellMap().mode==0,"Host map did not close");
+    session.mapKey(PAD_B);require(session.spellMap().mode==0,"Host map did not close");
     wiiz_core_sram_read(session.core(),after.data(),after.size());require(before==after,"Host map changed SRAM / MP");
+    session.openMap();session.mapKey(PAD_UP);session.mapKey(PAD_A);
+    require(session.spellMap().mode==0,"Host map warp did not close");
+    for(unsigned frame=0;frame<180;++frame)session.tick(0,1,frame*17);
+    require((wiiz_core_map_position(session.core())&0xffffff)==(unsigned(mapStart.floor)<<16|unsigned((mapStart.y+1)%20)<<8|unsigned(mapStart.x)),"Host map warp destination mismatch");
+    require(session.explored(mapStart.floor,mapStart.x,(mapStart.y+1)%20),"Host map warp did not record destination");
+    wiiz_core_sram_read(session.core(),after.data(),after.size());
+    const unsigned mapMp=game==1?0x29:0x427;
+    require(std::memcmp(before.data()+mapMp,after.data()+mapMp,game==1?7:14)==0,"Host map warp consumed spell MP");
+    session.loadState(1);session.openMap();session.mapKey(PAD_START);session.mapKey(PAD_UP);session.mapKey(PAD_A);
+    for(unsigned frame=0;frame<180;++frame)session.tick(0,1,frame*17);
+    require((wiiz_core_map_position(session.core())&0xffffff)==0x020100,"Host map cross-floor warp mismatch");
+    session.loadState(1);session.openMap();session.mapKey(PAD_SELECT);session.mapKey(PAD_A);
+    for(unsigned frame=0;frame<180;++frame)session.tick(0,1,frame*17);
+    require((wiiz_core_map_position(session.core())&0xffffff)==0,"Host map surface warp mismatch");
+    session.loadState(1);
     const unsigned start=game==1?0:0x400,gold=game==1?0x13:0x11,exp=gold+6;
     auto decimal=[&](const std::vector<uint8_t>& data,unsigned at){uint64_t value=0;for(unsigned i=0;i<6;++i)value=value*100+(data[at+i]>>4)*10+(data[at+i]&15);return value;};
     const auto oldGold=decimal(before,start+gold),oldExp=decimal(before,start+exp);
@@ -550,4 +572,147 @@ int bugFixCheck(const char* romPath,const char* folderPath) {
     session.bugFix(true);session.bugFix(false);
     require(identifyRom(pathFromUtf8(romPath)).sha==entry.sha,"Source ROM modified");
     std::puts("BUGFIX_OK toggle SRAM state music original-ROM");return 0;
+}
+
+int itemsCheck(const char* romPath,const char* folderPath) {
+    auto entry=identifyRom(pathFromUtf8(romPath));auto folder=pathFromUtf8(folderPath);
+    if(!fs::exists(folder/"states"/(utf8(entry.path.stem())+".stot1.state")))spellMapPrepare(romPath,folderPath);
+    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states");session.loadState(1);
+    auto members=session.openItems();require(!members.empty(),"Missing party inventory");
+    const unsigned game=entry.identity.scenario;
+    std::vector<uint8_t> seed(8192);wiiz_core_sram_read(session.core(),seed.data(),seed.size());
+    const unsigned flags=game==1?0x4c:0x43,count=game==1?0x5c:0x53;
+    auto offset=[&](unsigned slot){return game==1?(slot-1)*256:0x400+(slot-1)*96;};
+    unsigned base=offset(members[0].slot);
+    // Explicit test-only inventory, with an identified weapon and unknown item.
+    const uint8_t weapon=game==2?13:1;
+    seed[base+count]=2;seed[base+flags]=0;seed[base+flags+1]=32;seed[base+flags+8]=weapon;seed[base+flags+9]=2;
+    for(unsigned i=2;i<8;++i){seed[base+flags+i]=0;seed[base+flags+8+i]=255;}
+    // Select an ordinary fighter so that the original equip check is applicable.
+    if(game==1)seed[base+11]=0;else seed[base+10]&=0xe3;
+    repairBattery(seed,game);wiiz_core_sram_write(session.core(),seed.data(),seed.size());
+    members=session.openItems();auto after=members;
+    require(!session.itemNameCodes(members[0].items[0]).empty(),"Missing Japanese item name");
+    session.equipItem(after[0],0);require(after[0].items[0].flags&128,"Equip did not set native flag");
+    session.updateItems(members,after);members=after;
+    std::vector<uint8_t> current(8192);wiiz_core_sram_read(session.core(),current.data(),current.size());
+    require(current[base+flags]&128,"Equipped flag not committed");
+    // II/III do not load combat arrays in town/the maze; verify the original
+    // calculation on a disposable core rather than requiring live scratch RAM.
+    auto calculation=std::make_unique<Session>(entry);
+    std::vector<uint8_t> inventoryState(wiiz_core_state_size(session.core()));
+    require(wiiz_core_state_write(session.core(),inventoryState.data(),inventoryState.size())&&wiiz_core_state_read(calculation->core(),inventoryState.data(),inventoryState.size()),"Cannot prepare original damage check");
+    require(wiiz_core_items_recalculate(calculation->core(),0)!=0,"Native damage calculation failed");
+    require(wiiz_core_peek(calculation->core(),game==1?0x7d82:game==2?0x53e:0x55e)==1&&wiiz_core_peek(calculation->core(),game==1?0x7d88:game==2?0x544:0x564)==(game==2?6u:8u),"Native weapon damage was not applied");
+    // Recalculation must leave HP, identity, spells and all other roster slots alone.
+    for(unsigned slot=1;slot<=20;++slot)for(unsigned i=0;i<(game==1?112u:94u);++i) {
+        bool permitted=slot==members[0].slot&&(i==flags||i==count||(i>=flags&&i<flags+16)||i==(game==1?0x28u:0x26u)||(game!=1&&i==0x59));
+        require(permitted||current[offset(slot)+i]==seed[offset(slot)+i],"Item update modified unrelated character data");
+    }
+    after=members;session.equipItem(after[0],0);require(!(after[0].items[0].flags&128),"Remove failed");session.updateItems(members,after);members=after;
+    after=members;std::swap(after[0].items[0],after[0].items[1]);session.updateItems(members,after);members=after;
+    require(members[0].items[0].flags==32,"Reorder lost unidentified flag");
+    after=members;after[0].items.erase(after[0].items.begin());session.updateItems(members,after);
+    bool rejected=false;try{session.updateItems(members,after);}catch(...){rejected=true;}require(rejected,"Stale inventory accepted");
+    session.save();auto reopened=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);
+    std::vector<uint8_t> loaded(8192);wiiz_core_sram_read(reopened->core(),loaded.data(),loaded.size());
+    require(loaded[base+count]==1&&loaded[base+flags+8]==weapon,"Saved inventory did not survive reload");
+    for(unsigned f=0;f<120;++f){session.input(0);session.frame();}
+    auto resumed=session.openItems();require(resumed[0].items.size()==1&&resumed[0].items[0].id==weapon,"Original game overwrote edited inventory");
+    // Two-member fixture exercises GBWiz's transfer/bulk interaction on the NES backend.
+    wiiz_core_sram_read(session.core(),seed.data(),seed.size());
+    unsigned partner=offset(20),stride=game==1?256:96;
+    std::copy_n(seed.begin()+base,stride,seed.begin()+partner);
+    seed[game==1?0x1def:0xb81]=2;seed[(game==1?0x1ddc:0xb82)+1]=game==1?0x73:19;
+    seed[partner+count]=2;seed[partner+flags]=32;seed[partner+flags+8]=2;
+    seed[partner+flags+1]=64;seed[partner+flags+9]=weapon;
+    repairBattery(seed,game);wiiz_core_sram_write(session.core(),seed.data(),seed.size());
+    ItemEditor editor;editor.open(session);
+    for(unsigned i=0;i<8;++i)editor.key(session,SDLK_DOWN);editor.key(session,SDLK_X);
+    auto bulk=session.openItems();require(bulk[0].items.size()==2&&bulk[1].items.size()==1&&bulk[0].items[1].flags==32&&bulk[1].items[0].flags==64,"Collect failed or moved cursed item");
+    editor.key(session,SDLK_DOWN);editor.key(session,SDLK_X);
+    bulk=session.openItems();require(bulk[0].items.empty()&&bulk[1].items.size()==3&&bulk[1].items[2].flags==32,"Bulk send lost flags");
+    editor.key(session,SDLK_RIGHT);editor.key(session,SDLK_X);editor.key(session,SDLK_DOWN);editor.key(session,SDLK_DOWN);editor.key(session,SDLK_X);editor.key(session,SDLK_X);
+    require(session.openItems()==bulk,"Default delete confirmation changed inventory");
+    // Move the ordinary weapon back using the single-item submenu.
+    editor.key(session,SDLK_DOWN);editor.key(session,SDLK_X);editor.key(session,SDLK_DOWN);editor.key(session,SDLK_X);
+    bulk=session.openItems();require(bulk[0].items.size()==1&&bulk[1].items.size()==2,"Individual transfer failed");
+    editor.key(session,SDLK_UP);editor.key(session,SDLK_X);editor.key(session,SDLK_DOWN);editor.key(session,SDLK_DOWN);editor.key(session,SDLK_X);editor.key(session,SDLK_RIGHT);
+    rejected=false;try{editor.key(session,SDLK_X);}catch(...){rejected=true;}
+    require(rejected&&session.openItems()==bulk,"Cursed item deletion accepted");
+    session.saveState(2);
+    session.reset();session.skipManufacturer();
+    wiiz_core_sram_read(session.core(),seed.data(),seed.size());seed[game==1?0x1def:0xb81]=0;wiiz_core_sram_write(session.core(),seed.data(),seed.size());
+    rejected=false;try{session.openItems();}catch(...){rejected=true;}require(rejected,"No-party state accepted item editor");
+    std::printf("ITEMS_OK scenario=%u original_recalc=1 equip=1 remove=1 flags=1 reorder=1 delete=1 stale_rejected=1 unrelated_records=preserved save_reload=1 resume=1 transfer=1 bulk=1 curse_guard=1 delete_default_no=1 party_only=1 no_party_rejected=1\n",game);return 0;
+}
+
+
+int itemsBattleCheck(const char* romPath,const char* folderPath) {
+    auto entry=identifyRom(pathFromUtf8(romPath));auto folder=pathFromUtf8(folderPath);
+    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states");session.loadState(1);
+    require(wiiz_core_items_battle_check(session.core())!=0,"Original encounter entry failed");
+    bool rejected=false;try{session.openItems();}catch(...){rejected=true;}require(rejected,"Battle entry accepted item editor");
+    for(unsigned i=0;i<20;++i)session.frame();
+    auto* image=SDL_CreateSurfaceFrom(256,240,SDL_PIXELFORMAT_RGBA32,session.pixels.data(),1024);SDL_SaveBMP(image,utf8(folder/"scene-battle.bmp").c_str());SDL_DestroySurface(image);
+    std::vector<uint8_t> before(8192),after(8192);wiiz_core_sram_read(session.core(),before.data(),before.size());
+    rejected=false;try{session.openItems();}catch(...){rejected=true;}wiiz_core_sram_read(session.core(),after.data(),after.size());
+    require(rejected&&before==after,"Battle inventory editor was not rejected");
+    session.saveState(5);session.loadState(5);rejected=false;try{session.openItems();}catch(...){rejected=true;}
+    require(rejected,"Restored battle state accepted item editor");
+    std::printf("ITEM_BATTLE_OK scenario=%u entry=original scene_rejected=1 state_restore_rejected=1\n",entry.identity.scenario);return 0;
+}
+
+int itemsScenesCheck(const char* romPath,const char* folderPath) {
+    auto entry=identifyRom(pathFromUtf8(romPath));auto folder=pathFromUtf8(folderPath);unsigned game=entry.identity.scenario;
+    auto owner=std::make_unique<Session>(entry,folder/"saves",SaveFormat::Json);auto& session=*owner;session.stateFolder(folder/"states");
+    auto press=[](Session& play,unsigned b){play.input(b);for(unsigned i=0;i<8;++i)play.frame();play.input(0);for(unsigned i=0;i<120;++i)play.frame();};
+    auto shot=[&](Session& play,const std::string& name){auto* image=SDL_CreateSurfaceFrom(256,240,SDL_PIXELFORMAT_RGBA32,play.pixels.data(),1024);SDL_SaveBMP(image,utf8(folder/("scene-"+name+".bmp")).c_str());SDL_DestroySurface(image);};
+    auto read=[](Session& play){std::vector<uint8_t> ram(8192);require(wiiz_core_sram_read(play.core(),ram.data(),ram.size()),"Scene inventory read failed");return ram;};
+    unsigned count=game==1?0x5c:0x53,flags=game==1?0x4c:0x43;
+    auto offset=[&](unsigned slot){return game==1?(slot-1)*256:0x400+(slot-1)*96;};
+    auto seed=[&](Session& play){auto members=play.openItems();auto ram=read(play);unsigned at=offset(members[0].slot);ram[at+count]=2;
+        for(unsigned i=0;i<8;++i){ram[at+flags+i]=i==1?32:0;ram[at+flags+8+i]=i<2?(game==2?13:1)+i:255;}
+        repairBattery(ram,game);wiiz_core_sram_write(play.core(),ram.data(),ram.size());};
+    unsigned scenes=0;
+    auto check=[&](Session& play,const std::string& name) {
+        shot(play,name);auto before=play.openItems();require(before[0].items.size()==2,"Scene lost inventory before edit");
+        auto screen=std::make_unique<decltype(play.pixels)>(play.pixels);auto after=before;std::swap(after[0].items[0],after[0].items[1]);
+        play.updateItems(before,after);require(play.pixels==*screen,"Item edit changed original scene");
+        for(unsigned i=0;i<120;++i)play.frame();auto resumed=play.openItems();
+        require(resumed==after,"Native scene overwrote edited inventory");
+        std::printf("ITEM_SCENE_OK %s count=%zu\n",name.c_str(),resumed.size());std::fflush(stdout);++scenes;
+    };
+    for(const auto& route:std::vector<std::pair<std::string,std::vector<unsigned>>>{{"dungeon",{}},{"camp",{PAD_B}},{"camp-person",{PAD_B,PAD_A}},{"camp-detail",{PAD_B,PAD_A,PAD_DOWN,PAD_A}}}) {
+        session.loadState(1);seed(session);for(unsigned key:route.second)press(session,key);check(session,route.first);session.saveState(3);
+    }
+    std::ifstream replay("tests/replays/wiz1-dungeon.txt");require(bool(replay),"Missing party replay");
+    struct Event {unsigned frame,key;bool down;};std::vector<Event> events;std::string line;
+    while(std::getline(replay,line)){unsigned frame;std::string key,action;std::istringstream row(line);if(!(row>>frame>>key>>action))continue;unsigned b=key=="X"?PAD_A:key=="Z"?PAD_B:PAD_DOWN;events.push_back({frame,b,action=="down"});}
+    auto townSession=[&](bool inspect) {
+        auto next=std::make_unique<Session>(entry,folder/("town-saves-"+std::to_string(SDL_GetPerformanceCounter())),SaveFormat::Json);
+        next->stateFolder(folder/"states");unsigned held=0;
+        for(unsigned frame=0;frame<2251;++frame) {
+            for(const auto& e:events)if(e.frame==frame){if(e.down)held|=e.key;else held&=~e.key;}
+            next->input(held);next->frame();
+            if(frame==1700){seed(*next);if(inspect)check(*next,"tavern-roster");}
+            if(inspect&&frame==1950)check(*next,"tavern");
+        }
+        return next;
+    };
+    {auto town=townSession(true);check(*town,"castle");town->saveState(4);}
+    for(unsigned facility=1;facility<=3;++facility) {
+        auto town=townSession(false);
+        for(unsigned n=0;n<facility;++n)press(*town,PAD_DOWN);press(*town,PAD_A);
+        std::string name=facility==1?"inn":facility==2?"shop":"temple";check(*town,name);
+        if(facility<3){press(*town,PAD_A);check(*town,name+"-person");}
+        if(facility==2){press(*town,PAD_DOWN);press(*town,PAD_A);check(*town,"shop-inventory");}
+        press(*town,PAD_B);require(!town->openItems().empty(),"Leaving facility lost party inventory");
+    }
+    {auto town=townSession(false);for(unsigned n=0;n<4;++n)press(*town,PAD_DOWN);press(*town,PAD_A);check(*town,"town-edge");
+        for(unsigned n=0;n<4;++n)press(*town,PAD_DOWN);press(*town,PAD_A);shot(*town,"training");
+        if(read(*town)[game==1?0x1def:0xb81])check(*town,"training");
+        else {bool denied=false;try{town->openItems();}catch(...){denied=true;}require(denied,"Native training disband accepted an empty party");std::puts("ITEM_SCENE_OK training original_party_disband=1 no_party_rejected=1");}}
+    itemsBattleCheck(romPath,folderPath);
+    std::printf("ITEM_SCENES_OK scenario=%u scenes=%u battle_rejected=1 battle_state_restore=1\n",game,scenes);return 0;
 }

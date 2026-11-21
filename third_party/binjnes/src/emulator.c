@@ -5064,7 +5064,10 @@ static u8 rare_opcode(E* e, u8 busval) {
       break;
     case 0xd8: c->D = 0; break;                         // CLD
     case 0xf8: c->D = 1; break;                         // SED
-    default: FATAL("NYI: opcode %02x @ PC=%04x\n", c->opcode, c->PC.val); break;
+    default:
+      PRINT_ERROR("NYI: opcode %02x @ PC=%04x\n", c->opcode, c->PC.val);
+      e->s.event |= EMULATOR_EVENT_INVALID_OPCODE;
+      break;
   }
   return busval;
 }
@@ -7080,6 +7083,13 @@ void emulator_convert_frame_buffer(Emulator *e, RGBAFrameBuffer fb) {
 
 u32 audio_buffer_get_frames(AudioBuffer *audio_buffer) {
   return (u32)(audio_buffer->position - audio_buffer->data);
+}
+
+void emulator_suspend_vblank_nmi(Emulator* e) {
+  e->s.p.ppuctrl &= 0x7f;
+  sched_clear(e, SCHED_NMI);
+  e->s.c.req_nmi = false;
+  e->s.c.has_nmi = false;
 }
 
 EEvent emulator_step(E* e) {

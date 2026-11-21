@@ -26,14 +26,14 @@ Wiizと同階層の`Wiiz_signing/signing/`に`release.properties`と`wiiz-releas
 開発版とは署名が異なるため上書きできません。既存の開発版を使う端末では、
 共有フォルダーの保存データを保全したうえで開発版を削除し、リリース版を導入します。
 初回起動時には同じ保存フォルダーを選び直してください。
-バージョンは0.1.0（versionCode 1）、Android 6.0以降のarm64-v8a端末用です。
+バージョンは0.1.2（versionCode 3）、Android 6.0以降のarm64-v8a端末用です。
 ROMは含みません。既存のライセンス表示はAPK内assets/licensesに同梱します。
 Wiz1パッチ由来の差分については[権利条件の未確認事項](wiz1-bugfix.md)が残っています。
 
 2026-10-21: assembleRelease・lintVitalRelease成功。専用RSA鍵でのv1/v2署名検証、
 zipalign（16KiBページ対応）、デバッグ無効、arm64-v8a/API 23以降を確認。
 APK内の既存ライセンス表示を確認し、ROM・署名鍵・パスワード設定の混入がないことを確認。
-配布用コピーは`output/android-release/Wiiz-0.1.0-arm64-v8a.apk`、
+配布用コピーは`output/android-release/Wiiz-0.1.2-arm64-v8a.apk`、
 同フォルダーの`SHA256SUMS.txt`にSHA256を保存。リリース版の実機起動は未検証です。
 
 2026-10-25: Git履歴に含まれていた署名鍵を退役し、新しいRSA 4096ビット鍵へ交換。

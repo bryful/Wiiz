@@ -17,6 +17,13 @@ void wiiz_core_input(WiizCore*, unsigned buttons);
 void wiiz_core_reset(WiizCore*);
 unsigned wiiz_core_title_ready(WiizCore*);
 unsigned wiiz_core_roster_editable(WiizCore*);
+unsigned wiiz_core_items_battle(WiizCore*);
+int wiiz_core_items_battle_check(WiizCore*);
+int wiiz_core_items_pause(WiizCore*);
+int wiiz_core_items_recalculate(WiizCore*, unsigned party_index);
+unsigned wiiz_core_items_stats_live(WiizCore*);
+int wiiz_core_items_merge(WiizCore*, WiizCore*);
+int wiiz_core_items_sync(WiizCore*,const uint8_t*,const uint8_t*,size_t);
 int wiiz_core_frame(WiizCore*);
 void wiiz_core_pixels(WiizCore*, uint32_t* rgba);
 const float* wiiz_core_audio(WiizCore*, size_t* count);
@@ -50,6 +57,7 @@ void wiiz_core_profile(WiizCore*, unsigned scenario);
 unsigned wiiz_core_map_event(WiizCore*);
 unsigned wiiz_core_map_position(WiizCore*);
 void wiiz_core_map_destination(WiizCore*, int dx, int dy, int df);
+int wiiz_core_map_warp(WiizCore*, unsigned floor, unsigned x, unsigned y);
 #ifdef __cplusplus
 }
 #endif

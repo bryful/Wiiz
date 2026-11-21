@@ -42,3 +42,5 @@ Native save additions:
 - Verification: tarball SHA512 matched the npm `dist.integrity` recorded in `jsnes/PROVENANCE.json`.
 
 The runtime sources and `dist/jsnes.js` are unmodified copies from the official npm package. AUTHORS.md is from the corresponding upstream revision. Unused npm distribution artifacts were omitted. There are no runtime npm dependencies. The local BGM adapter lives outside this directory in `web/audio/driver.js`; it selects music through the original ROM driver's RAM interface and filters unrelated game-scene sound requests. Generated players retain the upstream license and author list.
+
+- GBWiz inventory UI: local `../GBWiz/src/item_menu.h`, MIT, Copyright (c) 2026 bryful. The two-character paused editor and flag-preserving action model are adapted for NES in `app/item_editor.hpp`; original source, license and provenance are retained in `gbwiz-items/`. Gambatte is not linked; native equipment recalculation uses the already-adopted binjnes Mapper 1/4 cores and the user's ROM. See `docs/item-editor.md` for supported contexts and validation.

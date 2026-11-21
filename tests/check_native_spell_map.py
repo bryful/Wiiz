@@ -36,6 +36,11 @@ def main():
         data=image.read_bytes();offset=struct.unpack_from('<I',data,10)[0];width,height=struct.unpack_from('<ii',data,18);bits=struct.unpack_from('<H',data,28)[0]
         assert width==1024 and abs(height)==860 and bits in (24,32)
         stride=((width*bits+31)//32)*4
+        # Sample away from the current-position arrow in the explored starting cell.
+        px,py=80+6,120+19*32+6
+        row=abs(height)-1-py if height>0 else py
+        blue,green,red=data[offset+row*stride+px*(bits//8):][:3]
+        assert (red,green,blue)==(24,88,64)
         # Unexplored tiles cannot disclose walls/events: their interiors stay uniformly gray.
         for x,y in ((10,10),(19,19),(1,0)):
             px,py=80+x*32+16,120+(19-y)*32+16

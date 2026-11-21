@@ -67,6 +67,13 @@ public:
     int rosterIdentity(unsigned slot, RosterField field) const;
     void setRosterIdentity(unsigned slot, RosterField field, unsigned value);
     void rosterBonus(unsigned slot, unsigned kind, uint64_t amount);
+    struct InventoryItem { uint8_t id=255, flags=0; bool operator==(const InventoryItem&) const = default; };
+    struct InventoryMember { unsigned slot=0; std::vector<InventoryItem> items; bool operator==(const InventoryMember&) const = default; };
+    std::vector<InventoryMember> openItems();
+    void updateItems(const std::vector<InventoryMember>& before,const std::vector<InventoryMember>& after);
+    void equipItem(InventoryMember& member,unsigned index) const;
+    std::vector<uint8_t> itemNameCodes(InventoryItem item) const;
+    std::vector<uint8_t> textPixels(const std::vector<uint8_t>& codes) const;
     WiizCore* core() { return core_; }
     std::array<uint32_t, 256 * 240> pixels{};
     std::string title;

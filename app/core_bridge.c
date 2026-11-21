@@ -16,7 +16,33 @@ struct WiizCore {
     unsigned repeat_events[4], initial_events[4];
     unsigned map_profile, map_events, title_ready, assists, creation_events, roster_editable;
     unsigned battle_exp_multiplier, battle_gold_multiplier;
+    unsigned host_warp;
 };
+/* Enter the ROM's own floor reload/redraw path only at its dungeon input wait.
+   The host map supplies absolute coordinates; spell costs/rules are separate. */
+static void host_warp_at_wait(WiizCore* core) {
+    Emulator* e=core->e;
+    uint8_t* ram=e->s.c.ram;
+    const unsigned p=core->host_warp;
+    const unsigned base=core->map_profile==1?0x3b:0xea;
+    ram[base]=(uint8_t)p;ram[base+1]=(uint8_t)(p>>8);ram[base+2]=(uint8_t)(p>>16);
+    core->host_warp=0;core->map_events=0;core->buttons=0;
+    if(core->map_profile==1) {
+        ram[0x14]=0;
+        if(!ram[base+2]) {e->s.c.PC.val=0xd164;return;} /* original RTS to castle caller */
+        /* JSR $DE38 (floor load), then the original dungeon redraw at $D265. */
+        ram[0x100+e->s.c.S--]=0xd2;ram[0x100+e->s.c.S--]=0x64;
+        e->s.c.PC.val=0xde38;
+    } else {
+        ram[0x19]=0;ram[0xc2]=0;
+        ram[0xed]=ram[0xea];ram[0xee]=ram[0xeb];ram[0xef]=ram[0xec];
+        /* Original MMC3 bank switch, then the ROM's travel/reload routine. */
+        const unsigned entry=core->map_profile==2?0x80bf:0x808b;
+        ram[0x100+e->s.c.S--]=(uint8_t)((entry-1)>>8);
+        ram[0x100+e->s.c.S--]=(uint8_t)(entry-1);
+        e->s.c.X=7;e->s.c.PC.val=core->map_profile==2?0xe4bc:0xffd6;
+    }
+}
 void wiiz_core_battle_multipliers(WiizCore* core, unsigned experience, unsigned gold) {
     core->battle_exp_multiplier = experience <= 256 ? experience : 1;
     core->battle_gold_multiplier = gold <= 256 ? gold : 1;
@@ -161,6 +187,11 @@ static bool sound_write(Emulator* e, uint16_t addr, uint8_t value, void* userdat
         }
     }
     if(core->map_profile) {
+        if(core->host_warp && ((profile==1 && addr==0x279 && pc==0xd2d9) ||
+           (profile>1 && bank==13 && addr==0xbf && (pc&0x1fff)==(profile==2?0x00cau:0x05dcu)))) {
+            host_warp_at_wait(core);
+            return true;
+        }
         if(profile==1 && bank/2==6 && pc==0x800d && addr==0x600 && value==1){core->title_ready=1;core->roster_editable=1;}
         if(profile>1 && bank==4 && pc==(profile==2?0x88a2u:0x890cu) && addr==0x603 && value==1){core->title_ready=1;core->roster_editable=1;}
         if(profile==1) {
@@ -218,6 +249,21 @@ unsigned wiiz_core_map_position(WiizCore* core) {
 void wiiz_core_map_destination(WiizCore* core,int dx,int dy,int df) {
     if(core->map_profile>1){core->e->s.c.ram[0xc0]=(uint8_t)dx;core->e->s.c.ram[0xc1]=(uint8_t)dy;core->e->s.c.ram[0xc2]=(uint8_t)(core->map_profile==3?-df:df);return;}
     core->e->s.c.ram[0x21e]=(uint8_t)dx;core->e->s.c.ram[0x21f]=(uint8_t)dy;core->e->s.c.ram[0x220]=(uint8_t)df;
+}
+int wiiz_core_map_warp(WiizCore* core,unsigned floor,unsigned x,unsigned y) {
+    if(!core->map_profile||floor>(core->map_profile==1?10u:6u)||x>=20||y>=20||(!floor&&(x||y)))return 0;
+    const size_t size=wiiz_core_state_size(core);
+    uint8_t* backup=malloc(size);
+    if(!backup)return 0;
+    if(!wiiz_core_state_write(core,backup,size)){free(backup);return 0;}
+    const unsigned events=core->map_events;
+    core->buttons=0;core->host_warp=0x80000000u|(floor<<16)|(y<<8)|x;
+    for(unsigned frame=0;frame<120;++frame) {
+        if(!wiiz_core_frame(core))break;
+        if(!core->host_warp){free(backup);return 1;}
+    }
+    core->host_warp=0;wiiz_core_state_read(core,backup,size);core->map_events=events;
+    free(backup);return 0;
 }
 void wiiz_core_repeat(WiizCore* core, unsigned held, unsigned repeat_due) {
     static const unsigned buttons[] = {PAD_UP, PAD_DOWN, PAD_LEFT, PAD_RIGHT};
@@ -484,4 +530,205 @@ int wiiz_core_tavern_probe(WiizCore* core) {
         }
     }
     return 1;
+}
+
+/* Item editor glue: execute the ROM on a disposable binjnes instance. */
+unsigned wiiz_core_items_battle(WiizCore* core) {
+    Emulator* e=core->e;
+    if(core->map_profile>1)return e->s.c.ram[0x90]!=0;
+    // FC-I's battle dispatcher jumps into $E0E9..$E5F4 in the fixed bank.
+    // Nested menus, sound and NMI retain a return into this dispatcher. Match
+    // an actual JSR in the ROM, not arbitrary bytes in unused stack memory.
+    unsigned pc=e->s.c.PC.val;
+    if(pc>=0xe0e9&&pc<0xe5f5)return 1;
+    for(unsigned sp=(unsigned)e->s.c.S+1;sp<255;++sp) {
+        unsigned ret=e->s.c.ram[0x100+sp]|((unsigned)e->s.c.ram[0x101+sp]<<8);
+        if(ret>=0xe0e9&&ret<0xe5f5&&e->ci.prg_data[0x1c000+ret-0xc000-2]==0x20)return 1;
+    }
+    return 0;
+}
+static int items_copy_address(unsigned game,unsigned pc) {
+    if(game==1)return (pc>=0x94fa&&pc<0x9544)||(pc>=0xae51&&pc<0xae6f);
+    return game==2?(pc>=0xc97e&&pc<0xc9cd):(pc>=0xc99d&&pc<0xc9e6);
+}
+static int items_transferring(WiizCore* core) {
+    Emulator* e=core->e;unsigned game=core->map_profile,pc=e->s.c.PC.val;
+    unsigned bank=e->s.m.prg8k_bank[0]&(e->ci.prg8k_banks-1);
+    if((game!=1||bank==12)&&items_copy_address(game,pc))return 1;
+    // A vblank handler may currently interrupt the native copy. Wait for its
+    // return too, rather than exposing a half-loaded or half-written inventory.
+    for(unsigned sp=(unsigned)e->s.c.S+1;sp<255;++sp) {
+        unsigned ret=e->s.c.ram[0x100+sp]|((unsigned)e->s.c.ram[0x101+sp]<<8);
+        if(items_copy_address(game,ret))return 1;
+    }
+    return 0;
+}
+int wiiz_core_items_pause(WiizCore* core) {
+    if(!core->map_profile||wiiz_core_items_battle(core))return 0;
+    // Every scene is eligible. Complete an in-flight native inventory copy
+    // and the current CPU instruction, without waiting for a dungeon event.
+    for(unsigned n=0;n<30000;++n) {
+        if(core->e->s.c.bits==0&&!items_transferring(core))return !wiiz_core_items_battle(core);
+        if(emulator_step(core->e)&EMULATOR_EVENT_INVALID_OPCODE)return 0;
+    }
+    return 0;
+}
+static int items_call(WiizCore* core,unsigned entry) {
+    Emulator* e=core->e;
+    uint8_t code[]={0x20,(uint8_t)entry,(uint8_t)(entry>>8),0x4c,3,7};
+    memcpy(e->s.c.ram+0x700,code,sizeof(code));
+    e->s.c.PC.val=0x700;e->s.c.S=0xff;
+    // binjnes preloads the next micro-op: cpu0 is decode, step points past 781.
+    e->s.c.bits=0;e->s.c.step=782;e->s.c.next_step=781;
+    e->s.c.req_reset=e->s.c.has_reset=e->s.c.has_irq=false;e->s.c.I=true;
+    emulator_suspend_vblank_nmi(e);
+    for(unsigned n=0;n<300000;++n) {
+        if(e->s.c.bits==0&&e->s.c.PC.val<0x8000&&
+           (e->s.c.PC.val<0x700||e->s.c.PC.val>0x706))return 0;
+        e->s.c.req_nmi=e->s.c.has_nmi=false;
+        if(emulator_step(e)&EMULATOR_EVENT_INVALID_OPCODE)return 0;
+        if(e->s.c.bits==0&&e->s.c.PC.val==0x703)return 1;
+    }
+    return 0;
+}
+int wiiz_core_items_recalculate(WiizCore* core,unsigned index) {
+    Emulator* e=core->e;unsigned game=core->map_profile;
+    if(!game||index>=6)return 0;
+    e->ram_write_filter=NULL;
+    // III disables battery access during parts of dungeon rendering. The
+    // disposable core must enable it before calling the original character code.
+    e->s.m.prg_ram_en=true;e->s.m.prg_ram_write_en=true;
+    for(unsigned i=0;i<4;++i){e->s.m.prg8k_bank[i]=(uint16_t)(12+i);e->prg_rom_map[i]=e->ci.prg_data+(12+i)*8192;}
+    if(game==1) {
+        // The interrupted scene may have left a partial MMC1 serial write.
+        e->s.m.mmc1.bits=5;e->s.m.mmc1.data=0;
+        e->s.m.mmc1.ctrl|=0x0c;e->s.m.prg_bank[0]=6;
+        e->s.c.ram[0xfb]=6;e->s.c.ram[0x2e]=0;e->s.c.ram[0x4e]=(uint8_t)index;
+        unsigned page=e->s.c.prg_ram[0x1ddc+index];
+        if(page<0x60||page>=0x74)return 0;
+        const uint8_t* record=e->s.c.prg_ram+(page-0x60)*256;
+        e->s.c.prg_ram[0x1dca+index]=record[0x23];
+        e->s.c.prg_ram[0x1dc4+index]=record[0x24];
+        return items_call(core,0xae6f);
+    }
+    unsigned slot=e->s.c.prg_ram[0xb82+index],address=0x6400+slot*96;
+    if(slot>=20)return 0;
+    e->s.c.ram[0x3d]=(uint8_t)address;e->s.c.ram[0x3e]=(uint8_t)(address>>8);
+    e->s.c.ram[0x0b]=(uint8_t)index;e->s.c.ram[0x7e]=12;e->s.c.ram[0x7f]=13;
+    const unsigned ac=game==2?0x4ea:0x50a;
+    const int old_ac=(int8_t)e->s.c.prg_ram[address-0x6000+0x26];
+    const int live_ac=(int8_t)e->s.c.ram[ac+index];
+    if(!items_call(core,game==2?0xd05a:0xd05c))return 0;
+    int next_ac=live_ac+(int8_t)e->s.c.prg_ram[address-0x6000+0x26]-old_ac;
+    if(next_ac < -99)next_ac=-99;if(next_ac>99)next_ac=99;
+    e->s.c.ram[ac+index]=(uint8_t)next_ac;
+    e->s.c.ram[0x3d]=(uint8_t)address;e->s.c.ram[0x3e]=(uint8_t)(address>>8);
+    e->s.c.ram[0x0b]=(uint8_t)index;
+    return items_call(core,game==2?0xbded:0x9e3d);
+}
+unsigned wiiz_core_items_stats_live(WiizCore* core) {
+    Emulator* e=core->e;unsigned game=core->map_profile;
+    if(!game)return 0;
+    // II/III rebuild these arrays on battle entry; outside battle they are
+    // scratch space. FC-I also needs its walking/camp passive-effect arrays.
+    if(game>1)return 0;
+    unsigned pc=e->s.c.PC.val;int dungeon=pc>=0xd23c&&pc<0xd521;
+    for(unsigned sp=(unsigned)e->s.c.S+1;!dungeon&&sp<255;++sp) {
+        unsigned ret=e->s.c.ram[0x100+sp]|((unsigned)e->s.c.ram[0x101+sp]<<8);
+        if(ret>=0xd23c&&ret<0xd521&&e->ci.prg_data[0x1c000+ret-0xc000-2]==0x20)dungeon=1;
+    }
+    if(!dungeon)return 0;
+    unsigned count=e->s.c.prg_ram[game==1?0x1def:0xb81];
+    if(!count||count>6)return 0;
+    for(unsigned i=0;i<count;++i) {
+        unsigned slot=e->s.c.prg_ram[(game==1?0x1ddc:0xb82)+i];
+        if(game==1){if(slot<0x60||slot>=0x74)return 0;slot-=0x60;}else if(slot>=20)return 0;
+        const uint8_t* c=e->s.c.prg_ram+(game==1?slot*256:0x400+slot*96);
+        if(game==1) {
+            static const unsigned addresses[]={0x1c08,0x1bde,0x1c5c,0x1c32,0x1dca,0x1dc4,0x1bb4};
+            for(unsigned j=0;j<7;++j)if(c[0x1f+j]!=e->s.c.prg_ram[addresses[j]+i])return 0;
+        } else {
+            static const unsigned addresses[]={0x39a,0x3c4,0x3ee,0x418,0x586,0x580,0x370};
+            for(unsigned j=0;j<7;++j)if(c[0x1d+j]!=e->s.c.ram[addresses[j]+(game==3?32:0)+i])return 0;
+        }
+    }
+    return 1;
+}
+int wiiz_core_items_merge(WiizCore* target,WiizCore* computed) {
+    unsigned game=target->map_profile;
+    if(!game||game!=computed->map_profile)return 0;
+    /* Only derived per-party arrays. CPU, stack, mapper, UI and HP stay live. */
+    static const unsigned first[]={0x7ad6,0x7adc,0x7ae2,0x7b0c,0x7b36,0x7b60,0x7b8a,0x7d82,0x7d88,0x7d8e,0x7db2,0x7db8,0x7dd0};
+    static const unsigned later[]={0x292,0x298,0x29e,0x2c8,0x31c,0x346,0x4ea,0x53e,0x544,0x54a,0x550,0x556,0x55c,0x562,0x568,0x56e,0x574};
+    for(unsigned i=0;i<(game==1?sizeof(first)/sizeof(*first):sizeof(later)/sizeof(*later));++i) {
+        unsigned at=game==1?first[i]:later[i]+(game==3?32:0);
+        if(at>=0x6000)memcpy(target->e->s.c.prg_ram+at-0x6000,computed->e->s.c.prg_ram+at-0x6000,6);
+        else memcpy(target->e->s.c.ram+at,computed->e->s.c.ram+at,6);
+    }
+    return 1;
+}
+
+/* Keep the original menu's inventory cache coherent when its owner is edited.
+   A matching party pointer, count and complete active payload are required;
+   unrelated zero-page/working data are never treated as an inventory. */
+int wiiz_core_items_sync(WiizCore* core,const uint8_t* before,const uint8_t* after,size_t size) {
+    if(size!=8192||!core->map_profile)return 0;
+    uint8_t* ram=core->e->s.c.ram;unsigned game=core->map_profile;
+    unsigned address=game==1?((unsigned)ram[0x2f]<<8):ram[0x3d]|((unsigned)ram[0x3e]<<8);
+    unsigned base,stride=game==1?256:96,start=game==1?0:0x400;
+    if(address<0x6000+start||address>=0x6000+start+20*stride||(address-0x6000-start)%stride)return 1;
+    base=address-0x6000;
+    unsigned count=game==1?0x5c:0x53,flags=game==1?0x4c:0x43;
+    unsigned count_cache=game==1?0x4d:0x57,id_cache=game==1?0x215:0x48,flag_cache=game==1?0x22a:0x40;
+    unsigned n=before[base+count],next=after[base+count];
+    if(n>8||next>8||ram[count_cache]!=n)return 1;
+    // Only the currently edited party member may own this cache.
+    unsigned party_count=before[game==1?0x1def:0xb81],party_list=game==1?0x1ddc:0xb82;
+    unsigned reference=game==1?address>>8:(base-start)/stride;int owner=0;
+    for(unsigned i=0;i<party_count&&i<6;++i)if(before[party_list+i]==reference)owner=1;
+    if(!owner||(memcmp(before+base+flags,after+base+flags,16)==0&&n==next))return 1;
+    for(unsigned i=0;i<n;++i)if(ram[id_cache+i]!=before[base+flags+8+i]||ram[flag_cache+i]!=before[base+flags+i])return 1;
+    unsigned remap[8]={0},used=0;
+    for(unsigned i=0;i<n;++i) {
+        remap[i]=next?(i<next?i:next-1):0;
+        for(unsigned exact=0;exact<2;++exact) {
+            int found=0;
+            for(unsigned j=0;j<next;++j)if(!(used&(1u<<j))&&before[base+flags+8+i]==after[base+flags+8+j]&&
+                (exact||before[base+flags+i]==after[base+flags+j])) {remap[i]=j;used|=1u<<j;found=1;break;}
+            if(found)break;
+        }
+    }
+    if(game==1) {
+        if(ram[0x2c]<n)ram[0x2c]=(uint8_t)remap[ram[0x2c]];
+        for(unsigned i=0;i<8;++i)if(ram[0x21e + i]<n)ram[0x21e + i]=(uint8_t)remap[ram[0x21e + i]];
+    } else if(ram[0x51]<n)ram[0x51]=(uint8_t)remap[ram[0x51]];
+    else if(ram[0x51]>=0x4b&&ram[0x51]<0x4b+n)ram[0x51]=(uint8_t)(0x4b+remap[ram[0x51]-0x4b]);
+    for(unsigned i=0;i<8;++i) {ram[id_cache+i]=after[base+flags+8+i];ram[flag_cache+i]=after[base+flags+i];}
+    ram[count_cache]=(uint8_t)next;
+    return 1;
+}
+
+/* Check-only encounter trigger on a disposable test Session. Execute the same
+   original entry as a random encounter, without patching ROM or battle flags. */
+int wiiz_core_items_battle_check(WiizCore* core) {
+    Emulator* e=core->e;unsigned game=core->map_profile;
+    if(!game)return 0;
+    for(unsigned i=0;i<4;++i){e->s.m.prg8k_bank[i]=(uint16_t)(12+i);e->prg_rom_map[i]=e->ci.prg_data+(12+i)*8192;}
+    if(game==1)e->s.c.ram[0xfb]=6;
+    else{e->s.c.ram[0x7e]=12;e->s.c.ram[0x7f]=13;}
+    unsigned entry=game==1?0xe0e1:0x8027;
+    uint8_t code[]={0x20,(uint8_t)entry,(uint8_t)(entry>>8),0x4c,3,7};
+    memcpy(e->s.c.ram+0x700,code,sizeof(code));
+    e->s.c.PC.val=0x700;e->s.c.bits=0;e->s.c.step=782;e->s.c.next_step=781;
+    core->buttons=0;e->s.m.prg_ram_en=e->s.m.prg_ram_write_en=true;
+    unsigned control=e->s.p.ppuctrl;e->s.p.ppuctrl&=0x7f;e->s.c.S=0xff;e->s.c.I=true;
+    e->s.c.req_reset=e->s.c.has_reset=e->s.c.req_nmi=e->s.c.has_nmi=e->s.c.has_irq=false;
+    for(unsigned f=0;f<2000000;++f) {
+        e->s.c.req_nmi=e->s.c.has_nmi=false;
+        EmulatorEvent event=emulator_step(e);
+        if(event&EMULATOR_EVENT_INVALID_OPCODE)return 0;
+        if(wiiz_core_items_battle(core)){e->s.p.ppuctrl=(uint8_t)control;return 1;}
+    }
+    fprintf(stderr,"Encounter timeout pc=%04x bank=%u/%u flag=%u\n",e->s.c.PC.val,e->s.m.prg8k_bank[0],e->s.m.prg8k_bank[1],e->s.c.ram[0x90]);
+    return 0;
 }

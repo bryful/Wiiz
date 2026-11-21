@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Wiiz VERSION 0.1.0 LANGUAGES C CXX)
+project(Wiiz VERSION 0.1.2 LANGUAGES C CXX)
 # Keep Android debug builds debuggable while running the existing emulator at full speed.
 # Apply before SDL is added so its audio/video adapters are optimized as well.
 if(ANDROID)
@@ -43,6 +43,8 @@ else()
   add_executable(wiiz ${WIIZ_SOURCES})
 endif()
 target_compile_features(wiiz PRIVATE cxx_std_20)
+target_compile_definitions(wiiz PRIVATE WIIZ_VERSION="${PROJECT_VERSION}"
+  WIIZ_VERSION_TUPLE=${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0)
 target_include_directories(wiiz PRIVATE third_party/picosha2 third_party/nlohmann)
 target_link_libraries(wiiz PRIVATE SDL3::SDL3 binjnes)
 if(NOT ANDROID)
@@ -100,3 +102,6 @@ install(FILES third_party/binjnes/wiiz-expansion-port.patch DESTINATION licenses
 install(FILES docs/turbofile.md DESTINATION docs)
 
 install(FILES LICENSE DESTINATION .)
+
+install(FILES docs/item-editor.md DESTINATION docs)
+install(DIRECTORY third_party/gbwiz-items/ DESTINATION licenses/GBWiz-items)

@@ -22,14 +22,14 @@ void drawSpellMap(SDL_Renderer* r,const Session& game){
     constexpr float left=80,top=120,cell=32;
     wizFrame(r,{28,54,968,772});
     wizText(r,&game,68,76,m.mode==3?"MAP":m.mode==1?"DUMAPIC":"MALOR",4);
-    const int floor=m.mode!=2?m.floor:m.targetFloor;
+    const int floor=m.mode==1?m.floor:m.targetFloor;
     wizText(r,&game,778,128,"FLOOR",3);
     if(floor==0)wizText(r,&game,120,400,"RETURN TO CASTLE",3);
     for(int y=0;floor>0&&y<20;++y)for(int x=0;x<20;++x){
         const auto& terrain=game.dungeon().floors.at(size_t(floor-1));
         const float px=left+x*cell,py=top+(19-y)*cell;
         const bool visited=game.explored(floor,x,y);
-        color(r,visited?0:96,visited?0:96,visited?0:96);
+        color(r,visited?24:96,visited?88:96,visited?64:96);
         SDL_FRect square{px+2,py+2,cell-4,cell-4};SDL_RenderFillRect(r,&square);
         // Preserve existing exploration/secret/darkness rules and ROM-derived geometry.
         if(!visited||(terrain.flags[y*20+x]&0x40))continue;
@@ -57,7 +57,7 @@ void drawSpellMap(SDL_Renderer* r,const Session& game){
         SDL_Vertex triangle[3]={{{tipX,tipY},{1,.27f,.27f,1},{0,0}},{{cx-dy[h]*8,cy+dx[h]*8},{1,.27f,.27f,1},{0,0}},{{cx+dy[h]*8,cy-dx[h]*8},{1,.27f,.27f,1},{0,0}}};
         SDL_RenderGeometry(r,nullptr,triangle,3,nullptr,0);
     }
-    if(m.mode==2){
+    if(m.mode==2||m.mode==3){
         if(floor>0){color(r,255,225,95);const float x=left+m.targetX*cell+5,y=top+(19-m.targetY)*cell+5;
             stroke(r,x,y,x+22,y);stroke(r,x,y+22,x+22,y+22);stroke(r,x,y,x,y+22);stroke(r,x+22,y,x+22,y+22);}
         wizText(r,&game,80,798,"ARROWS:MOVE  SELECT/START:FLOOR  A:WARP B:BACK",2);
