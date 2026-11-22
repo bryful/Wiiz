@@ -16,7 +16,7 @@ struct WiizCore {
     unsigned repeat_events[4], initial_events[4];
     unsigned map_profile, map_events, title_ready, assists, creation_events, roster_editable;
     unsigned battle_exp_multiplier, battle_gold_multiplier;
-    unsigned host_warp;
+    unsigned host_warp, host_camp;
 };
 /* Enter the ROM's own floor reload/redraw path only at its dungeon input wait.
    The host map supplies absolute coordinates; spell costs/rules are separate. */
@@ -26,15 +26,24 @@ static void host_warp_at_wait(WiizCore* core) {
     const unsigned p=core->host_warp;
     const unsigned base=core->map_profile==1?0x3b:0xea;
     ram[base]=(uint8_t)p;ram[base+1]=(uint8_t)(p>>8);ram[base+2]=(uint8_t)(p>>16);
-    core->host_warp=0;core->map_events=0;core->buttons=0;
+    core->host_warp=(p&0x00ff0000u)?0x40000000u:0;core->map_events=0;core->buttons=0;
     if(core->map_profile==1) {
         ram[0x14]=0;
-        if(!ram[base+2]) {e->s.c.PC.val=0xd164;return;} /* original RTS to castle caller */
-        /* JSR $DE38 (floor load), then the original dungeon redraw at $D265. */
-        ram[0x100+e->s.c.S--]=0xd2;ram[0x100+e->s.c.S--]=0x64;
+        if(!ram[base+2]) {e->s.c.PC.val=0xd8e6;return;} /* original dungeon-to-castle cleanup */
+        /* Match the original MALOR return at $D928: reload, then $D293.
+           $D265 also runs room-entry events and can wait for another input. */
+        ram[0x100+e->s.c.S--]=0xd2;ram[0x100+e->s.c.S--]=0x92;
         e->s.c.PC.val=0xde38;
     } else {
         ram[0x19]=0;ram[0xc2]=0;
+        /* III's native dungeon-exit routine ($A75B) clears the split-screen
+           height before the travel/save code starts waiting for VBlank. */
+        if(core->map_profile==3) {
+            ram[0x75]=0;
+            /* Native dungeon input dispatch ($A606) enables battery access
+               before calling into bank 7. The wait loop leaves it disabled. */
+            e->mapper_write(e,0xa001,0x80);
+        }
         ram[0xed]=ram[0xea];ram[0xee]=ram[0xeb];ram[0xef]=ram[0xec];
         /* Original MMC3 bank switch, then the ROM's travel/reload routine. */
         const unsigned entry=core->map_profile==2?0x80bf:0x808b;
@@ -187,10 +196,25 @@ static bool sound_write(Emulator* e, uint16_t addr, uint8_t value, void* userdat
         }
     }
     if(core->map_profile) {
-        if(core->host_warp && ((profile==1 && addr==0x279 && pc==0xd2d9) ||
+        /* FC-I can stop for a tile event before its ordinary movement loop.
+           The floor and view have already been rebuilt at this point. */
+        if(profile==1 && core->host_warp==0x40000000u &&
+           addr==0x19 && pc==0xc14a &&
+           e->s.c.ram[0x100+((e->s.c.S+1)&255)]==0xb1 &&
+           e->s.c.ram[0x100+((e->s.c.S+2)&255)]==0xd2) {
+            core->host_warp=0;
+            core->map_events|=4;
+        }
+        if(core->host_warp && ((profile==1 && ((addr==0x279 && pc==0xd2d9) ||
+           (core->host_camp && addr==0x2aa && pc==0xd28d))) ||
            (profile>1 && bank==13 && addr==0xbf && (pc&0x1fff)==(profile==2?0x00cau:0x05dcu)))) {
-            host_warp_at_wait(core);
-            return true;
+            if(core->host_warp&0x80000000u) {
+                host_warp_at_wait(core);
+                core->host_camp=0;
+                return true;
+            }
+            /* The ROM has finished reloading and reached its next input wait. */
+            core->host_warp=0;
         }
         if(profile==1 && bank/2==6 && pc==0x800d && addr==0x600 && value==1){core->title_ready=1;core->roster_editable=1;}
         if(profile>1 && bank==4 && pc==(profile==2?0x88a2u:0x890cu) && addr==0x603 && value==1){core->title_ready=1;core->roster_editable=1;}
@@ -250,19 +274,38 @@ void wiiz_core_map_destination(WiizCore* core,int dx,int dy,int df) {
     if(core->map_profile>1){core->e->s.c.ram[0xc0]=(uint8_t)dx;core->e->s.c.ram[0xc1]=(uint8_t)dy;core->e->s.c.ram[0xc2]=(uint8_t)(core->map_profile==3?-df:df);return;}
     core->e->s.c.ram[0x21e]=(uint8_t)dx;core->e->s.c.ram[0x21f]=(uint8_t)dy;core->e->s.c.ram[0x220]=(uint8_t)df;
 }
+static int map_in_camp(WiizCore* core) {
+    /* Active JSR returns from the native dungeon's camp call, including nested
+       character/spell/item menus. Do not interpret unrelated town/battle input. */
+    const unsigned ret=core->map_profile==1?0xd287:core->map_profile==2?0xf8e0:0xf96c;
+    for(unsigned sp=(unsigned)core->e->s.c.S+1;sp<255;++sp)
+        if((core->e->s.c.ram[0x100+sp]|((unsigned)core->e->s.c.ram[0x101+sp]<<8))==ret)return 1;
+    return 0;
+}
 int wiiz_core_map_warp(WiizCore* core,unsigned floor,unsigned x,unsigned y) {
     if(!core->map_profile||floor>(core->map_profile==1?10u:6u)||x>=20||y>=20||(!floor&&(x||y)))return 0;
+    if(wiiz_core_items_battle(core))return 0;
     const size_t size=wiiz_core_state_size(core);
     uint8_t* backup=malloc(size);
     if(!backup)return 0;
     if(!wiiz_core_state_write(core,backup,size)){free(backup);return 0;}
     const unsigned events=core->map_events;
+    const int camp=map_in_camp(core);
+    core->host_camp=camp;
     core->buttons=0;core->host_warp=0x80000000u|(floor<<16)|(y<<8)|x;
-    for(unsigned frame=0;frame<120;++frame) {
+    /* Allow the ROM's reload/redraw to finish before reporting success.
+       An unavailable initial dungeon wait still times out after 120 frames. */
+    for(unsigned frame=0;frame<1200;++frame) {
+        if(core->host_warp&0x80000000u) {
+            if(frame>=(camp?360u:120u))break;
+            /* Let the ROM unwind/save its own camp menus using cancel input.
+               Stop sending B as soon as the active camp call has returned. */
+            core->buttons=camp&&map_in_camp(core)&&frame%16>=3&&frame%16<6?PAD_B:0;
+        } else core->buttons=0;
         if(!wiiz_core_frame(core))break;
-        if(!core->host_warp){free(backup);return 1;}
+        if(!core->host_warp){core->host_camp=0;free(backup);return 1;}
     }
-    core->host_warp=0;wiiz_core_state_read(core,backup,size);core->map_events=events;
+    core->host_warp=0;core->host_camp=0;wiiz_core_state_read(core,backup,size);core->map_events=events;
     free(backup);return 0;
 }
 void wiiz_core_repeat(WiizCore* core, unsigned held, unsigned repeat_due) {

@@ -459,7 +459,7 @@ void Session::mapKey(unsigned button) {
     }
     if(button==PAD_A||button==PAD_B) {
         if(m.mode==3&&button==PAD_A) {
-            if(!wiiz_core_map_warp(core_,m.targetFloor,m.targetX,m.targetY))throw std::runtime_error("Map movement is only available while exploring the dungeon");
+            if(!wiiz_core_map_warp(core_,m.targetFloor,m.targetX,m.targetY))throw std::runtime_error("Map movement is available in the dungeon or camp; finish battles and treasure first");
             wiiz_core_pixels(core_,pixels.data());
         }
         if(m.mode==2&&button==PAD_A)wiiz_core_map_destination(core_,m.targetX-m.x,m.targetY-m.y,m.targetFloor-m.floor);

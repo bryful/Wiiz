@@ -1,4 +1,4 @@
-"""Actual FC-I casts and SDL map input, with no changes to user saves or ROMs."""
+"""Actual FC casts and SDL map input, with no changes to user saves or ROMs."""
 import hashlib
 import json
 import os
@@ -22,14 +22,16 @@ def main():
         assert 'SPELL_MAP_OK' in result.stdout and 'actual_spells=2' in result.stdout
         print(result.stdout.splitlines()[-1])
         states = temp/'states'
+        dungeon_state=(states/f'{rom.stem}.stot1.state').read_bytes()
         assert json.loads((states/f'{rom.stem}.stot4.state').read_text())['automap']['dialog'][0] == 1
         assert json.loads((states/f'{rom.stem}.stot5.state').read_text())['automap']['dialog'][0] == 2
 
         def play(name, script, frames=100):
             keys=temp/(name+'.txt');keys.write_text(script)
             image=temp/(name+'.bmp')
-            subprocess.run([exe,'--smoke-turbo',str(rom),str(image),str(frames),str(keys),'4',str(temp/'saves')],
-                           env=env,capture_output=True,check=True)
+            result=subprocess.run([exe,'--smoke-turbo',str(rom),str(image),str(frames),str(keys),'4',str(temp/'saves')],
+                                  env=env,capture_output=True,text=True,check=True)
+            assert 'menu=0' in result.stdout, result.stdout
             return image
 
         image=play('dumapic','1 Shift+F4 down\n2 Shift+F4 up\n',30)
@@ -55,7 +57,15 @@ def main():
         play('cancel','1 Shift+F5 down\n2 Shift+F5 up\n10 S down\n13 S up\n20 A down\n23 A up\n30 Z down\n33 Z up\n80 F1 down\n81 F1 up\n')
         a=json.loads((states/f'{rom.stem}.stot1.state').read_text())['automap']
         assert a['dialog'][0]==0 and a['dialog'][5]==1 and sum(a['explored'])==1
-        print('SDL DUMAPIC close, MALOR target/floor/confirm/cancel, and hidden unexplored geometry: OK')
+        (states/f'{rom.stem}.stot1.state').write_bytes(dungeon_state)
+        play('host-repeat','1 Shift+F1 down\n2 Shift+F1 up\n10 M down\n11 M up\n20 Up down\n21 Up up\n30 X down\n31 X up\n32 M down\n33 M up\n34 X down\n35 X up\n80 F1 down\n81 F1 up\n')
+        a=json.loads((states/f'{rom.stem}.stot1.state').read_text())['automap']
+        assert a['dialog'][0]==0 and a['explored'][20]==1
+        for slot in (2,3):
+            play(f'host-camp-{slot}',f'1 Shift+F{slot} down\n2 Shift+F{slot} up\n10 M down\n11 M up\n20 Up down\n21 Up up\n30 X down\n31 X up\n60 M down\n61 M up\n80 F1 down\n81 F1 up\n')
+            a=json.loads((states/f'{rom.stem}.stot1.state').read_text())['automap']
+            assert a['dialog'][:4]==[3,1,0,1], 'Camp movement did not reach the selected tile'
+        print('SDL DUMAPIC/MALOR, repeated host warp, nested camp movement, hidden geometry: OK')
     assert hashlib.sha256(rom.read_bytes()).hexdigest()==original
 
 

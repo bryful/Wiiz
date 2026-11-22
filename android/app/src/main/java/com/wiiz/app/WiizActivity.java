@@ -80,7 +80,13 @@ public class WiizActivity extends SDLActivity {
                 Math.max(1, mLayout.getHeight() - safeTop - safeBottom));
         params.leftMargin = safeLeft;
         params.topMargin = safeTop;
-        controls.setLayoutParams(params);
+        android.view.ViewGroup.LayoutParams current = controls.getLayoutParams();
+        if (!(current instanceof RelativeLayout.LayoutParams)
+                || current.width != params.width || current.height != params.height
+                || ((RelativeLayout.LayoutParams)current).leftMargin != params.leftMargin
+                || ((RelativeLayout.LayoutParams)current).topMargin != params.topMargin) {
+            controls.setLayoutParams(params);
+        }
         arrange(params.width, params.height);
     }
     private final Set<Integer> heldButtons = new HashSet<>();
@@ -169,6 +175,13 @@ public class WiizActivity extends SDLActivity {
     private void releaseButtons() {
         for (int action : heldButtons) touchKey(action, false);
         heldButtons.clear();
+    }
+
+    // Called by the SDL thread when the original game is not at its dungeon input wait.
+    public void showMapMoveUnavailable() {
+        runOnUiThread(() -> Toast.makeText(this,
+            "移動できません。戦闘・宝箱の操作を終了してください。迷宮の探索中・キャンプ中は移動できます。",
+            Toast.LENGTH_LONG).show());
     }
 
     @Override protected void onPause() {

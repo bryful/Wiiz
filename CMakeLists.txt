@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Wiiz VERSION 0.1.2 LANGUAGES C CXX)
+project(Wiiz VERSION 0.1.3 LANGUAGES C CXX)
 # Keep Android debug builds debuggable while running the existing emulator at full speed.
 # Apply before SDL is added so its audio/video adapters are optimized as well.
 if(ANDROID)

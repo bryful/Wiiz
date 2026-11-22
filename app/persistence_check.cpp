@@ -255,6 +255,8 @@ int difficultyCheck(const char* romPath,const char* folderPath) {
     wiiz_core_sram_read(session.core(),after.data(),after.size());require(before==after,"Host map changed SRAM / MP");
     session.openMap();session.mapKey(PAD_UP);session.mapKey(PAD_A);
     require(session.spellMap().mode==0,"Host map warp did not close");
+    session.openMap();session.mapKey(PAD_A);
+    require(session.spellMap().mode==0,"Immediate repeated host map warp failed");
     for(unsigned frame=0;frame<180;++frame)session.tick(0,1,frame*17);
     require((wiiz_core_map_position(session.core())&0xffffff)==(unsigned(mapStart.floor)<<16|unsigned((mapStart.y+1)%20)<<8|unsigned(mapStart.x)),"Host map warp destination mismatch");
     require(session.explored(mapStart.floor,mapStart.x,(mapStart.y+1)%20),"Host map warp did not record destination");
@@ -267,7 +269,22 @@ int difficultyCheck(const char* romPath,const char* folderPath) {
     session.loadState(1);session.openMap();session.mapKey(PAD_SELECT);session.mapKey(PAD_A);
     for(unsigned frame=0;frame<180;++frame)session.tick(0,1,frame*17);
     require((wiiz_core_map_position(session.core())&0xffffff)==0,"Host map surface warp mismatch");
+    for(unsigned campSlot:{1u,2u,3u}) {
+        session.loadState(campSlot);
+        if(campSlot==1) {
+            session.input(PAD_B);for(unsigned f=0;f<3;++f)session.frame();
+            session.input(0);for(unsigned f=0;f<100;++f)session.frame();
+        }
+        wiiz_core_sram_read(session.core(),before.data(),before.size());
+        session.openMap();session.mapKey(PAD_UP);session.mapKey(PAD_A);
+        require(session.spellMap().mode==0,"Camp host map movement did not close");
+        for(unsigned f=0;f<180;++f)session.tick(0,1,f*17);
+        require((wiiz_core_map_position(session.core())&0xffffff)==0x010100,"Camp host map destination mismatch");
+        wiiz_core_sram_read(session.core(),after.data(),after.size());
+        require(std::memcmp(before.data()+mapMp,after.data()+mapMp,game==1?7:14)==0,"Camp host map consumed MP");
+    }
     session.loadState(1);
+    wiiz_core_sram_read(session.core(),before.data(),before.size());
     const unsigned start=game==1?0:0x400,gold=game==1?0x13:0x11,exp=gold+6;
     auto decimal=[&](const std::vector<uint8_t>& data,unsigned at){uint64_t value=0;for(unsigned i=0;i<6;++i)value=value*100+(data[at+i]>>4)*10+(data[at+i]&15);return value;};
     const auto oldGold=decimal(before,start+gold),oldExp=decimal(before,start+exp);

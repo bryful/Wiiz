@@ -813,7 +813,18 @@ int main(int argc, char** argv) {
                         if (key == SDLK_X) { try { launch(entries[chosen], !smoke); } catch (const std::exception& ex) { status = ex.what(); } }
                     }
                 } else if(key==SDLK_I){try{silence();itemEditor.open(*game);menu=true;menuPage=MenuPage::Items;status="";}catch(const std::exception& ex){status=ex.what();}}
-                else if(game->spellMap().mode) {try{game->mapKey(key==SDLK_M&&game->spellMap().mode==3?PAD_B:button(key));}catch(const std::exception& ex){status=ex.what();silence();menu=true;}if(game->spellMap().mode){sourcePressed.insert(e.key.key);updateHeld();}else{pressed.clear();padPressed.clear();held=0;}}
+                else if(game->spellMap().mode) {
+                    try{game->mapKey(key==SDLK_M&&game->spellMap().mode==3?PAD_B:button(key));status.clear();}
+                    catch(const std::exception& ex){
+                        status=ex.what();silence();
+#ifdef SDL_PLATFORM_ANDROID
+                        userstore::Bridge bridge;
+                        const auto notify=bridge.env->GetMethodID(bridge.type,"showMapMoveUnavailable","()V");
+                        bridge.env->CallVoidMethod(bridge.activity,notify);
+#endif
+                    }
+                    if(game->spellMap().mode){sourcePressed.insert(e.key.key);updateHeld();}else{pressed.clear();padPressed.clear();held=0;}
+                }
                 else if(key==SDLK_M){silence();game->openMap();}
                 else {sourcePressed.insert(e.key.key);updateHeld();}
             }
