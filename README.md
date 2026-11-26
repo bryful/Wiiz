@@ -1,5 +1,9 @@
 # Wiiz
 
+** アプリを統合して一つにまとめました。今後の開発は[https://github.com/bryful/WizPlayer](https://github.com/bryful/WizPlayer)で行います。**
+
+
+
 ファミコン版Wizardry Ⅰ・Ⅱ・ⅢをWindows／Androidで遊ぶためのアプリです。
 既存のbinjnesエミュレーターコアを利用し、原作の映像・音声、速度変更、探索済みマップ、セーブ・ステート保存、ゲームパッド入力などに対応します。
 
